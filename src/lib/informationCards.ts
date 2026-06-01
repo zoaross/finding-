@@ -9,6 +9,17 @@ export type InformationCard = {
   summary: string | null;
   details: string | null;
   tags: string[];
+  supply_skills: string[];
+  supply_languages: string[];
+  supply_country: string | null;
+  supply_city: string | null;
+  offer_summary: string | null;
+  education: string | null;
+  projects: string | null;
+  work_experience: string | null;
+  places_lived: string[];
+  proof_links: string[];
+  proof_note: string | null;
   media_urls: string[];
   voice_intro_url: string | null;
   visibility: "public" | "private";
@@ -22,6 +33,17 @@ export type InformationCardInput = {
   summary?: string | null;
   details?: string | null;
   tags?: string[];
+  supply_skills?: string[];
+  supply_languages?: string[];
+  supply_country?: string | null;
+  supply_city?: string | null;
+  offer_summary?: string | null;
+  education?: string | null;
+  projects?: string | null;
+  work_experience?: string | null;
+  places_lived?: string[];
+  proof_links?: string[];
+  proof_note?: string | null;
   media_urls?: string[];
   voice_intro_url?: string | null;
   visibility?: "public" | "private";
@@ -32,7 +54,9 @@ const CARD_BUCKET = "card-media";
 export async function loadInformationCards(userId: string): Promise<InformationCard[]> {
   const { data, error } = await (supabase as any)
     .from("information_cards")
-    .select("id, user_id, title, category, summary, details, tags, media_urls, voice_intro_url, visibility, created_at, updated_at")
+    .select(
+      "id, user_id, title, category, summary, details, tags, supply_skills, supply_languages, supply_country, supply_city, offer_summary, education, projects, work_experience, places_lived, proof_links, proof_note, media_urls, voice_intro_url, visibility, created_at, updated_at",
+    )
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -52,6 +76,17 @@ export async function saveInformationCard(
     summary: input.summary?.trim() || null,
     details: input.details?.trim() || null,
     tags: input.tags ?? [],
+    supply_skills: input.supply_skills ?? [],
+    supply_languages: input.supply_languages ?? [],
+    supply_country: input.supply_country?.trim() || null,
+    supply_city: input.supply_city?.trim() || null,
+    offer_summary: input.offer_summary?.trim() || null,
+    education: input.education?.trim() || null,
+    projects: input.projects?.trim() || null,
+    work_experience: input.work_experience?.trim() || null,
+    places_lived: input.places_lived ?? [],
+    proof_links: input.proof_links ?? [],
+    proof_note: input.proof_note?.trim() || null,
     media_urls: input.media_urls ?? [],
     voice_intro_url: input.voice_intro_url ?? null,
     visibility: input.visibility ?? "public",
@@ -62,7 +97,11 @@ export async function saveInformationCard(
     ? (supabase as any).from("information_cards").update(payload).eq("id", id).eq("user_id", user.id)
     : (supabase as any).from("information_cards").insert(payload);
 
-  const { data, error } = await query.select("id, user_id, title, category, summary, details, tags, media_urls, voice_intro_url, visibility, created_at, updated_at").single();
+  const { data, error } = await query
+    .select(
+      "id, user_id, title, category, summary, details, tags, supply_skills, supply_languages, supply_country, supply_city, offer_summary, education, projects, work_experience, places_lived, proof_links, proof_note, media_urls, voice_intro_url, visibility, created_at, updated_at",
+    )
+    .single();
   if (error) throw error;
   return normalizeCard(data);
 }
@@ -99,6 +138,17 @@ function normalizeCard(row: any): InformationCard {
     summary: row.summary ?? null,
     details: row.details ?? null,
     tags: Array.isArray(row.tags) ? row.tags : [],
+    supply_skills: Array.isArray(row.supply_skills) ? row.supply_skills.map(String) : [],
+    supply_languages: Array.isArray(row.supply_languages) ? row.supply_languages.map(String) : [],
+    supply_country: row.supply_country ?? null,
+    supply_city: row.supply_city ?? null,
+    offer_summary: row.offer_summary ?? null,
+    education: row.education ?? null,
+    projects: row.projects ?? null,
+    work_experience: row.work_experience ?? null,
+    places_lived: Array.isArray(row.places_lived) ? row.places_lived.map(String) : [],
+    proof_links: Array.isArray(row.proof_links) ? row.proof_links.map(String) : [],
+    proof_note: row.proof_note ?? null,
     media_urls: Array.isArray(row.media_urls) ? row.media_urls : [],
     voice_intro_url: row.voice_intro_url ?? null,
     visibility: row.visibility === "private" ? "private" : "public",

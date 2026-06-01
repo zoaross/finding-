@@ -99,9 +99,31 @@ const identityCards = [
 
 type IdentityCardView = (typeof identityCards)[number] & {
   id?: string;
+  supplySkills?: string[];
+  supplyLanguages?: string[];
+  supplyCountry?: string | null;
+  supplyCity?: string | null;
+  offerSummary?: string | null;
+  education?: string | null;
+  projects?: string | null;
+  workExperience?: string | null;
+  placesLived?: string[];
+  proofLinks?: string[];
+  proofNote?: string | null;
   mediaUrls?: string[];
   voiceIntroUrl?: string | null;
 };
+
+function parseOptionalList(value: string): string[] {
+  return value
+    .split(/\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function joinOptionalList(value?: string[] | null): string {
+  return Array.isArray(value) ? value.join(", ") : "";
+}
 
 const reviews = [
   {
@@ -314,6 +336,64 @@ function IdentityCard({
         </div>
         <h4 className="font-display text-lg font-bold">{card.title}</h4>
         <p className="mt-1 text-xs text-muted-foreground">{card.desc}</p>
+        {(card.offerSummary ||
+          card.supplySkills?.length ||
+          card.supplyLanguages?.length ||
+          card.supplyCountry ||
+          card.supplyCity) && (
+          <div className="mt-3 rounded-xl border border-[var(--border)] bg-white/[0.025] p-3">
+            {card.offerSummary && (
+              <p className="text-xs leading-relaxed text-foreground">{card.offerSummary}</p>
+            )}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {[...(card.supplySkills ?? []), ...(card.supplyLanguages ?? [])].slice(0, 5).map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full border border-accent/25 bg-accent/10 px-2 py-0.5 text-[10px] text-accent-soft"
+                >
+                  {t}
+                </span>
+              ))}
+              {[card.supplyCity, card.supplyCountry].filter(Boolean).join(", ") && (
+                <span className="rounded-full border border-[var(--border)] bg-white/[0.03] px-2 py-0.5 text-[10px] text-muted-foreground">
+                  {[card.supplyCity, card.supplyCountry].filter(Boolean).join(", ")}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+        {(card.education ||
+          card.projects ||
+          card.workExperience ||
+          card.placesLived?.length ||
+          card.proofLinks?.length ||
+          card.proofNote) && (
+          <details className="mt-3 rounded-xl border border-[var(--border)] bg-white/[0.02] p-3 text-xs">
+            <summary className="cursor-pointer text-muted-foreground">Experience & proof</summary>
+            <div className="mt-2 space-y-2 text-muted-foreground">
+              {card.education && <p>Education: {card.education}</p>}
+              {card.projects && <p>Projects: {card.projects}</p>}
+              {card.workExperience && <p>Work: {card.workExperience}</p>}
+              {card.placesLived?.length ? <p>Places lived: {card.placesLived.join(", ")}</p> : null}
+              {card.proofNote && <p>Proof: {card.proofNote}</p>}
+              {card.proofLinks?.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {card.proofLinks.slice(0, 3).map((link) => (
+                    <a
+                      key={link}
+                      href={link}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-full border border-[var(--border)] px-2 py-0.5 text-accent-soft hover:text-accent"
+                    >
+                      Link
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </details>
+        )}
         {card.mediaUrls?.[0] && (
           <div className="mt-3 overflow-hidden rounded-xl border border-[var(--border)] bg-black/20">
             {/\.(mp4|mov|webm)(\?|$)/i.test(card.mediaUrls[0]) ? (
@@ -391,6 +471,17 @@ export function ProfilePageInner({
   const [newCardEmoji, setNewCardEmoji] = useState("✨");
   const [newCardTitle, setNewCardTitle] = useState("");
   const [newCardDesc, setNewCardDesc] = useState("");
+  const [newCardSkills, setNewCardSkills] = useState("");
+  const [newCardLanguages, setNewCardLanguages] = useState("");
+  const [newCardCountry, setNewCardCountry] = useState("");
+  const [newCardCity, setNewCardCity] = useState("");
+  const [newCardOffer, setNewCardOffer] = useState("");
+  const [newCardEducation, setNewCardEducation] = useState("");
+  const [newCardProjects, setNewCardProjects] = useState("");
+  const [newCardWork, setNewCardWork] = useState("");
+  const [newCardPlaces, setNewCardPlaces] = useState("");
+  const [newCardProofLinks, setNewCardProofLinks] = useState("");
+  const [newCardProofNote, setNewCardProofNote] = useState("");
   const [newCardMediaFiles, setNewCardMediaFiles] = useState<File[]>([]);
   const [newCardMediaPreviews, setNewCardMediaPreviews] = useState<string[]>([]);
   const [newCardVoiceFile, setNewCardVoiceFile] = useState<File | null>(null);
@@ -578,6 +669,17 @@ export function ProfilePageInner({
             desc: card.summary || card.details || cardSupplyFallback,
             tags: card.tags.length ? card.tags : [card.category],
             glow: CARD_GLOWS[i % CARD_GLOWS.length],
+            supplySkills: card.supply_skills,
+            supplyLanguages: card.supply_languages,
+            supplyCountry: card.supply_country,
+            supplyCity: card.supply_city,
+            offerSummary: card.offer_summary,
+            education: card.education,
+            projects: card.projects,
+            workExperience: card.work_experience,
+            placesLived: card.places_lived,
+            proofLinks: card.proof_links,
+            proofNote: card.proof_note,
             mediaUrls: card.media_urls,
             voiceIntroUrl: card.voice_intro_url,
           })),
@@ -797,6 +899,17 @@ export function ProfilePageInner({
     setNewCardEmoji("✨");
     setNewCardTitle("");
     setNewCardDesc("");
+    setNewCardSkills("");
+    setNewCardLanguages("");
+    setNewCardCountry("");
+    setNewCardCity("");
+    setNewCardOffer("");
+    setNewCardEducation("");
+    setNewCardProjects("");
+    setNewCardWork("");
+    setNewCardPlaces("");
+    setNewCardProofLinks("");
+    setNewCardProofNote("");
     setNewCardMediaFiles([]);
     setNewCardMediaPreviews([]);
     setNewCardVoiceFile(null);
@@ -810,6 +923,17 @@ export function ProfilePageInner({
     setNewCardEmoji(c.emoji);
     setNewCardTitle(c.title);
     setNewCardDesc(c.desc === cardSupplyFallback ? "" : c.desc);
+    setNewCardSkills(joinOptionalList(c.supplySkills));
+    setNewCardLanguages(joinOptionalList(c.supplyLanguages));
+    setNewCardCountry(c.supplyCountry ?? "");
+    setNewCardCity(c.supplyCity ?? "");
+    setNewCardOffer(c.offerSummary ?? "");
+    setNewCardEducation(c.education ?? "");
+    setNewCardProjects(c.projects ?? "");
+    setNewCardWork(c.workExperience ?? "");
+    setNewCardPlaces(joinOptionalList(c.placesLived));
+    setNewCardProofLinks((c.proofLinks ?? []).join("\n"));
+    setNewCardProofNote(c.proofNote ?? "");
     setNewCardMediaFiles([]);
     setNewCardMediaPreviews(c.mediaUrls ?? []);
     setNewCardVoiceFile(null);
@@ -876,6 +1000,11 @@ export function ProfilePageInner({
     }
 
     let savedId = editingCard?.id;
+    const supplySkills = parseOptionalList(newCardSkills || newCardTitle);
+    const supplyLanguages = parseOptionalList(newCardLanguages);
+    const placesLived = parseOptionalList(newCardPlaces);
+    const proofLinks = parseOptionalList(newCardProofLinks);
+    const tags = Array.from(new Set([newCardTitle.trim(), ...supplySkills].filter(Boolean)));
     try {
       const saved = await saveInformationCard(
         user,
@@ -884,7 +1013,18 @@ export function ProfilePageInner({
           category: "Skill",
           summary: newCardDesc.trim() || cardSupplyFallback,
           details: newCardDesc.trim() || null,
-          tags: [newCardTitle.trim()],
+          tags,
+          supply_skills: supplySkills,
+          supply_languages: supplyLanguages,
+          supply_country: newCardCountry.trim() || null,
+          supply_city: newCardCity.trim() || null,
+          offer_summary: newCardOffer.trim() || null,
+          education: newCardEducation.trim() || null,
+          projects: newCardProjects.trim() || null,
+          work_experience: newCardWork.trim() || null,
+          places_lived: placesLived,
+          proof_links: proofLinks,
+          proof_note: newCardProofNote.trim() || null,
           media_urls: mediaUrls,
           voice_intro_url: voiceIntroUrl,
           visibility: "public",
@@ -908,7 +1048,18 @@ export function ProfilePageInner({
               emoji: newCardEmoji,
               title: newCardTitle.trim(),
               desc: newCardDesc.trim() || cardSupplyFallback,
-              tags: [newCardTitle.trim()],
+              tags,
+              supplySkills,
+              supplyLanguages,
+              supplyCountry: newCardCountry.trim() || null,
+              supplyCity: newCardCity.trim() || null,
+              offerSummary: newCardOffer.trim() || null,
+              education: newCardEducation.trim() || null,
+              projects: newCardProjects.trim() || null,
+              workExperience: newCardWork.trim() || null,
+              placesLived,
+              proofLinks,
+              proofNote: newCardProofNote.trim() || null,
               mediaUrls,
               voiceIntroUrl,
             }
@@ -922,8 +1073,19 @@ export function ProfilePageInner({
           emoji: newCardEmoji,
           title: newCardTitle.trim(),
           desc: newCardDesc.trim() || cardSupplyFallback,
-          tags: [newCardTitle.trim()],
+          tags,
           glow: CARD_GLOWS[realIdentCards.length % CARD_GLOWS.length],
+          supplySkills,
+          supplyLanguages,
+          supplyCountry: newCardCountry.trim() || null,
+          supplyCity: newCardCity.trim() || null,
+          offerSummary: newCardOffer.trim() || null,
+          education: newCardEducation.trim() || null,
+          projects: newCardProjects.trim() || null,
+          workExperience: newCardWork.trim() || null,
+          placesLived,
+          proofLinks,
+          proofNote: newCardProofNote.trim() || null,
           mediaUrls,
           voiceIntroUrl,
         },
@@ -944,6 +1106,17 @@ export function ProfilePageInner({
     setNewCardTitle("");
     setNewCardDesc("");
     setNewCardEmoji("✨");
+    setNewCardSkills("");
+    setNewCardLanguages("");
+    setNewCardCountry("");
+    setNewCardCity("");
+    setNewCardOffer("");
+    setNewCardEducation("");
+    setNewCardProjects("");
+    setNewCardWork("");
+    setNewCardPlaces("");
+    setNewCardProofLinks("");
+    setNewCardProofNote("");
     setNewCardMediaFiles([]);
     setNewCardMediaPreviews([]);
     setNewCardVoiceFile(null);
@@ -1721,7 +1894,7 @@ export function ProfilePageInner({
                 {editingCardIndex !== null ? t("card.editTitle") : t("card.addTitle")}
               </h3>
               <p className="mt-1 text-xs text-muted-foreground">{t("card.modalHint")}</p>
-              <div className="mt-5 space-y-3">
+              <div className="mt-5 max-h-[70vh] space-y-3 overflow-y-auto pr-1">
                 <div>
                   <label className="text-xs text-muted-foreground">{t("card.emoji")}</label>
                   <input
@@ -1750,6 +1923,115 @@ export function ProfilePageInner({
                     className="mt-1 w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
                   />
                 </div>
+                <details open className="rounded-2xl border border-[var(--border)] bg-white/[0.02] p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-foreground">
+                    Basic supply
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground">Skills</label>
+                      <input
+                        value={newCardSkills}
+                        onChange={(e) => setNewCardSkills(e.target.value)}
+                        placeholder="React, Korean tutoring, IELTS speaking..."
+                        className="mt-1 w-full rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">Languages</label>
+                      <input
+                        value={newCardLanguages}
+                        onChange={(e) => setNewCardLanguages(e.target.value)}
+                        placeholder="English fluent, Korean native..."
+                        className="mt-1 w-full rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs text-muted-foreground">Country</label>
+                        <input
+                          value={newCardCountry}
+                          onChange={(e) => setNewCardCountry(e.target.value)}
+                          placeholder="Korea"
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground">City</label>
+                        <input
+                          value={newCardCity}
+                          onChange={(e) => setNewCardCity(e.target.value)}
+                          placeholder="Seoul"
+                          className="mt-1 w-full rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">What I can provide</label>
+                      <textarea
+                        value={newCardOffer}
+                        onChange={(e) => setNewCardOffer(e.target.value)}
+                        rows={2}
+                        placeholder="Describe the help, resource, or value this card offers."
+                        className="mt-1 w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                      />
+                    </div>
+                  </div>
+                </details>
+                <details className="rounded-2xl border border-[var(--border)] bg-white/[0.02] p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-foreground">
+                    Experience
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <input
+                      value={newCardEducation}
+                      onChange={(e) => setNewCardEducation(e.target.value)}
+                      placeholder="Education or training"
+                      className="w-full rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                    />
+                    <textarea
+                      value={newCardProjects}
+                      onChange={(e) => setNewCardProjects(e.target.value)}
+                      rows={2}
+                      placeholder="Relevant projects"
+                      className="w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                    />
+                    <textarea
+                      value={newCardWork}
+                      onChange={(e) => setNewCardWork(e.target.value)}
+                      rows={2}
+                      placeholder="Work or practical experience"
+                      className="w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                    />
+                    <input
+                      value={newCardPlaces}
+                      onChange={(e) => setNewCardPlaces(e.target.value)}
+                      placeholder="Places lived, separated by commas"
+                      className="w-full rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                    />
+                  </div>
+                </details>
+                <details className="rounded-2xl border border-[var(--border)] bg-white/[0.02] p-3">
+                  <summary className="cursor-pointer text-sm font-medium text-foreground">
+                    Proof
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <textarea
+                      value={newCardProofLinks}
+                      onChange={(e) => setNewCardProofLinks(e.target.value)}
+                      rows={2}
+                      placeholder="Portfolio, GitHub, LinkedIn, website links"
+                      className="w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                    />
+                    <textarea
+                      value={newCardProofNote}
+                      onChange={(e) => setNewCardProofNote(e.target.value)}
+                      rows={2}
+                      placeholder="Optional proof note, certificate, result, or credibility signal"
+                      className="w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                    />
+                  </div>
+                </details>
                 <label
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={(e) => {
