@@ -713,6 +713,11 @@ function HomePage() {
                     <textarea
                       value={need}
                       onChange={(e) => setNeed(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
+                        e.preventDefault();
+                        e.currentTarget.form?.requestSubmit();
+                      }}
                       placeholder={t("home.needPlaceholder")}
                       rows={5}
                       className="w-full resize-none rounded-2xl border border-[var(--border)] bg-white/[0.03] p-4 text-sm leading-relaxed text-foreground placeholder:text-muted-foreground/70 focus:border-[var(--border-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--ring)]"
