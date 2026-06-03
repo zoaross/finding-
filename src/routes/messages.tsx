@@ -76,6 +76,7 @@ type Conversation = {
   matchTag: string;
   isSimulated?: boolean;
   needId?: string | null;
+  dataSource: "real_supabase";
 };
 
 type MatchConversationRow = {
@@ -89,98 +90,6 @@ type MatchConversationRow = {
   partner_name?: string | null;
   status?: string | null;
 };
-
-// Demo conversations shown when user has no real matches yet
-const demoConversations: Conversation[] = [
-  {
-    id: "1",
-    name: "luna_bjd",
-    emoji: "🎨",
-    region: "🇰🇷 首尔",
-    preview: "好的!那我们周三视频细聊一下~",
-    time: "刚刚",
-    unread: 2,
-    online: true,
-    matchTag: "BJD 插画",
-  },
-  {
-    id: "2",
-    name: "Aiko 田中",
-    emoji: "📚",
-    region: "🇯🇵 东京",
-    preview: "ありがとう!明日の14時で大丈夫です",
-    time: "12 分钟前",
-    unread: 0,
-    online: true,
-    matchTag: "日语家教",
-  },
-  {
-    id: "3",
-    name: "startup_ceo",
-    emoji: "💻",
-    region: "🇺🇸 旧金山",
-    preview: "Sent you the JD, take a look",
-    time: "1 小时前",
-    unread: 1,
-    online: false,
-    matchTag: "前端工程师",
-  },
-  {
-    id: "4",
-    name: "foodie_서울",
-    emoji: "🍜",
-    region: "🇰🇷 江南区",
-    preview: "周六中午在弘大见?",
-    time: "昨天",
-    unread: 0,
-    online: true,
-    matchTag: "约饭搭子",
-  },
-  {
-    id: "5",
-    name: "indie_music",
-    emoji: "🎵",
-    region: "🇯🇵 大阪",
-    preview: "demo 收到了,旋律很有感觉",
-    time: "昨天",
-    unread: 0,
-    online: false,
-    matchTag: "音乐合作",
-  },
-  {
-    id: "6",
-    name: "photo_kim",
-    emoji: "📸",
-    region: "🇰🇷 弘大",
-    preview: "形象照拍摄费用我私信发你",
-    time: "2 天前",
-    unread: 0,
-    online: false,
-    matchTag: "摄影师",
-  },
-  {
-    id: "7",
-    name: "game_dev",
-    emoji: "🎮",
-    region: "🇩🇪 柏林",
-    preview: "Pixel art portfolio looks amazing",
-    time: "3 天前",
-    unread: 0,
-    online: false,
-    matchTag: "游戏美术",
-  },
-  {
-    id: "8",
-    name: "study_buddy",
-    emoji: "📚",
-    region: "🇨🇳 上海",
-    preview: "今天的 TOPIK 模考你做完了吗?",
-    time: "4 天前",
-    unread: 0,
-    online: true,
-    matchTag: "学习搭子",
-  },
-];
 
 function relTime(iso: string) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -209,38 +118,6 @@ const SUCCESS_TAGS = [
 ] as const;
 
 const hiddenStatusFilter = `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`;
-
-const initialThread: Record<string, Message[]> = {
-  "1": [
-    { id: "seed-1", from: "them", text: "你好!看到你的作品集了,风格非常对味 ✨", time: "14:02" },
-    {
-      id: "seed-2",
-      from: "them",
-      text: "我想找人帮我做一个暗黑奇幻系列的BJD原画,大概 4-6 张",
-      time: "14:02",
-    },
-    { id: "seed-3", from: "me", text: "你好 luna!很高兴你喜欢我的风格 🎨", time: "14:08" },
-    {
-      id: "seed-4",
-      from: "me",
-      text: "可以详细聊一下,你心目中的氛围是偏哥特还是偏神秘学的?",
-      time: "14:08",
-    },
-    {
-      id: "seed-5",
-      from: "them",
-      text: "更偏神秘学一点,有月相、塔罗、星轨这些元素",
-      time: "14:15",
-    },
-    {
-      id: "seed-6",
-      from: "me",
-      text: "完美,我之前刚好做过类似的系列。我把参考稿发你看看?",
-      time: "14:17",
-    },
-    { id: "seed-7", from: "them", text: "好的!那我们周三视频细聊一下~", time: "14:20" },
-  ],
-};
 
 function NavRail() {
   const { t } = useI18n();
@@ -307,6 +184,7 @@ function MessagesPage() {
   const [showReport, setShowReport] = useState(false);
   const [reportReason, setReportReason] = useState<string>("harassment");
   const [reportNote, setReportNote] = useState("");
+  const [lastOpenedConversationId, setLastOpenedConversationId] = useState<string>("");
 
   const [showLangPicker, setShowLangPicker] = useState(false);
   const [langSearch, setLangSearch] = useState("");
@@ -432,6 +310,7 @@ function MessagesPage() {
         matchTag: (m.tag as string) ?? (m.match_tag as string) ?? t("messages.matchingTag"),
         isSimulated: !!p?.is_simulated,
         needId: (m.needId ?? m.need_id) as string | undefined,
+        dataSource: "real_supabase",
       };
     });
   };
@@ -592,6 +471,7 @@ function MessagesPage() {
 
   useEffect(() => {
     if (!user || !searchConversationId) return;
+    setLastOpenedConversationId(searchConversationId);
     activateConversation(searchConversationId);
     void loadRealConversations(user.id, searchConversationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -601,6 +481,10 @@ function MessagesPage() {
     if (!user) return;
     const onConversationOpened = (event: Event) => {
       const matchId = (event as CustomEvent<{ matchId?: string }>).detail?.matchId ?? null;
+      if (matchId) {
+        setLastOpenedConversationId(matchId);
+        void navigate({ to: "/messages", search: { conversationId: matchId }, replace: true });
+      }
       activateConversation(matchId);
       void loadRealConversations(user.id, matchId);
     };
@@ -662,8 +546,8 @@ function MessagesPage() {
       if (cancelled) return;
       setThread((prev) => {
         if (prev.some((x) => x.id === m.id)) return prev;
-        // Drop seed messages once real DB messages start flowing.
-        const cleaned = prev.filter((x) => !x.id.startsWith("seed-") && !x.id.startsWith("local-"));
+        // Drop optimistic local messages once the saved DB row arrives.
+        const cleaned = prev.filter((x) => !x.id.startsWith("local-"));
         return [...cleaned, toMessage(m)];
       });
     });
@@ -764,6 +648,7 @@ function MessagesPage() {
     (c) =>
       !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.matchTag.includes(search),
   );
+  const selectedSidebarId = filtered.find((c) => c.id === activeConversationId)?.id ?? "";
 
   const handleComplete = () => {
     if (!active) return;
@@ -1544,6 +1429,18 @@ function MessagesPage() {
             </motion.aside>
           )}
         </AnimatePresence>
+      </div>
+
+      <div className="fixed bottom-3 right-3 z-[60] max-w-[360px] rounded-2xl border border-amber-300/30 bg-black/80 p-3 font-mono text-[10px] leading-relaxed text-amber-100 shadow-2xl backdrop-blur">
+        <div className="mb-1 font-semibold text-amber-300">Messages debug</div>
+        <div>activeConversationId: {activeConversationId || "none"}</div>
+        <div>url conversationId: {searchConversationId ?? "none"}</div>
+        <div>selected sidebar id: {selectedSidebarId || "none"}</div>
+        <div>
+          chat header partner: {active?.userId ?? "none"} / {active?.name ?? "none"}
+        </div>
+        <div>toast opened id: {lastOpenedConversationId || "none"}</div>
+        <div>data source: {active?.dataSource ?? "real_supabase"}</div>
       </div>
 
       {/* Rating modal */}
