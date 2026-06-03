@@ -24,6 +24,11 @@ import { Route as BookmarksRouteImport } from './routes/bookmarks'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as UserUsernameRouteImport } from './routes/user.$username'
+import { Route as CardsCardIdRouteImport } from './routes/cards.$cardId'
+import { Route as AdminUsersRouteImport } from './routes/admin.users'
+import { Route as AdminReportsRouteImport } from './routes/admin.reports'
+import { Route as AdminRelationsRouteImport } from './routes/admin.relations'
+import { Route as AdminFeedbackRouteImport } from './routes/admin.feedback'
 
 const TermsRoute = TermsRouteImport.update({
   id: '/terms',
@@ -100,6 +105,31 @@ const UserUsernameRoute = UserUsernameRouteImport.update({
   path: '/user/$username',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CardsCardIdRoute = CardsCardIdRouteImport.update({
+  id: '/cards/$cardId',
+  path: '/cards/$cardId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminUsersRoute = AdminUsersRouteImport.update({
+  id: '/admin/users',
+  path: '/admin/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminReportsRoute = AdminReportsRouteImport.update({
+  id: '/admin/reports',
+  path: '/admin/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRelationsRoute = AdminRelationsRouteImport.update({
+  id: '/admin/relations',
+  path: '/admin/relations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminFeedbackRoute = AdminFeedbackRouteImport.update({
+  id: '/admin/feedback',
+  path: '/admin/feedback',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -116,6 +146,11 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
+  '/admin/feedback': typeof AdminFeedbackRoute
+  '/admin/relations': typeof AdminRelationsRoute
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/cards/$cardId': typeof CardsCardIdRoute
   '/user/$username': typeof UserUsernameRoute
 }
 export interface FileRoutesByTo {
@@ -133,6 +168,11 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
+  '/admin/feedback': typeof AdminFeedbackRoute
+  '/admin/relations': typeof AdminRelationsRoute
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/cards/$cardId': typeof CardsCardIdRoute
   '/user/$username': typeof UserUsernameRoute
 }
 export interface FileRoutesById {
@@ -151,6 +191,11 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/settings': typeof SettingsRoute
   '/terms': typeof TermsRoute
+  '/admin/feedback': typeof AdminFeedbackRoute
+  '/admin/relations': typeof AdminRelationsRoute
+  '/admin/reports': typeof AdminReportsRoute
+  '/admin/users': typeof AdminUsersRoute
+  '/cards/$cardId': typeof CardsCardIdRoute
   '/user/$username': typeof UserUsernameRoute
 }
 export interface FileRouteTypes {
@@ -170,6 +215,11 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/settings'
     | '/terms'
+    | '/admin/feedback'
+    | '/admin/relations'
+    | '/admin/reports'
+    | '/admin/users'
+    | '/cards/$cardId'
     | '/user/$username'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -187,6 +237,11 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/settings'
     | '/terms'
+    | '/admin/feedback'
+    | '/admin/relations'
+    | '/admin/reports'
+    | '/admin/users'
+    | '/cards/$cardId'
     | '/user/$username'
   id:
     | '__root__'
@@ -204,6 +259,11 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/settings'
     | '/terms'
+    | '/admin/feedback'
+    | '/admin/relations'
+    | '/admin/reports'
+    | '/admin/users'
+    | '/cards/$cardId'
     | '/user/$username'
   fileRoutesById: FileRoutesById
 }
@@ -222,6 +282,11 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SettingsRoute: typeof SettingsRoute
   TermsRoute: typeof TermsRoute
+  AdminFeedbackRoute: typeof AdminFeedbackRoute
+  AdminRelationsRoute: typeof AdminRelationsRoute
+  AdminReportsRoute: typeof AdminReportsRoute
+  AdminUsersRoute: typeof AdminUsersRoute
+  CardsCardIdRoute: typeof CardsCardIdRoute
   UserUsernameRoute: typeof UserUsernameRoute
 }
 
@@ -332,6 +397,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UserUsernameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cards/$cardId': {
+      id: '/cards/$cardId'
+      path: '/cards/$cardId'
+      fullPath: '/cards/$cardId'
+      preLoaderRoute: typeof CardsCardIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/users': {
+      id: '/admin/users'
+      path: '/admin/users'
+      fullPath: '/admin/users'
+      preLoaderRoute: typeof AdminUsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/reports': {
+      id: '/admin/reports'
+      path: '/admin/reports'
+      fullPath: '/admin/reports'
+      preLoaderRoute: typeof AdminReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/relations': {
+      id: '/admin/relations'
+      path: '/admin/relations'
+      fullPath: '/admin/relations'
+      preLoaderRoute: typeof AdminRelationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/feedback': {
+      id: '/admin/feedback'
+      path: '/admin/feedback'
+      fullPath: '/admin/feedback'
+      preLoaderRoute: typeof AdminFeedbackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -350,6 +450,11 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SettingsRoute: SettingsRoute,
   TermsRoute: TermsRoute,
+  AdminFeedbackRoute: AdminFeedbackRoute,
+  AdminRelationsRoute: AdminRelationsRoute,
+  AdminReportsRoute: AdminReportsRoute,
+  AdminUsersRoute: AdminUsersRoute,
+  CardsCardIdRoute: CardsCardIdRoute,
   UserUsernameRoute: UserUsernameRoute,
 }
 export const routeTree = rootRouteImport

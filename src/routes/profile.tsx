@@ -99,11 +99,13 @@ const identityCards = [
 
 type IdentityCardView = (typeof identityCards)[number] & {
   id?: string;
+  longDetails?: string | null;
   supplySkills?: string[];
   supplyLanguages?: string[];
   supplyCountry?: string | null;
   supplyCity?: string | null;
   offerSummary?: string | null;
+  connectionPreferences?: string | null;
   education?: string | null;
   projects?: string | null;
   workExperience?: string | null;
@@ -249,6 +251,7 @@ function IdentityCard({
   onDelete,
   onEdit,
   onSave,
+  onOpen,
   saved,
 }: {
   card: IdentityCardView;
@@ -256,6 +259,7 @@ function IdentityCard({
   onDelete?: () => void;
   onEdit?: () => void;
   onSave?: () => void;
+  onOpen?: () => void;
   saved?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -275,11 +279,14 @@ function IdentityCard({
       transition={{ delay: 0.1 + index * 0.08, duration: 0.5 }}
       onMouseMove={onMove}
       onMouseLeave={() => setTilt({ x: 0, y: 0 })}
+      onClick={onOpen}
       style={{
         transform: `perspective(900px) rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
         transition: "transform 0.2s ease-out",
       }}
-      className="group relative overflow-hidden rounded-2xl border border-[var(--border)] bg-white/[0.02] p-5 hover:border-[var(--border-strong)]"
+      className={`group relative overflow-hidden rounded-2xl border border-[var(--border)] bg-white/[0.02] p-5 hover:border-[var(--border-strong)] ${
+        onOpen ? "cursor-pointer" : ""
+      }`}
     >
       <div
         className={`absolute -inset-12 -z-0 bg-gradient-to-br ${card.glow} opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-100`}
@@ -346,14 +353,16 @@ function IdentityCard({
               <p className="text-xs leading-relaxed text-foreground">{card.offerSummary}</p>
             )}
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {[...(card.supplySkills ?? []), ...(card.supplyLanguages ?? [])].slice(0, 5).map((t) => (
-                <span
-                  key={t}
-                  className="rounded-full border border-accent/25 bg-accent/10 px-2 py-0.5 text-[10px] text-accent-soft"
-                >
-                  {t}
-                </span>
-              ))}
+              {[...(card.supplySkills ?? []), ...(card.supplyLanguages ?? [])]
+                .slice(0, 5)
+                .map((t) => (
+                  <span
+                    key={t}
+                    className="rounded-full border border-accent/25 bg-accent/10 px-2 py-0.5 text-[10px] text-accent-soft"
+                  >
+                    {t}
+                  </span>
+                ))}
               {[card.supplyCity, card.supplyCountry].filter(Boolean).join(", ") && (
                 <span className="rounded-full border border-[var(--border)] bg-white/[0.03] px-2 py-0.5 text-[10px] text-muted-foreground">
                   {[card.supplyCity, card.supplyCountry].filter(Boolean).join(", ")}
@@ -471,11 +480,13 @@ export function ProfilePageInner({
   const [newCardEmoji, setNewCardEmoji] = useState("✨");
   const [newCardTitle, setNewCardTitle] = useState("");
   const [newCardDesc, setNewCardDesc] = useState("");
+  const [newCardDetails, setNewCardDetails] = useState("");
   const [newCardSkills, setNewCardSkills] = useState("");
   const [newCardLanguages, setNewCardLanguages] = useState("");
   const [newCardCountry, setNewCardCountry] = useState("");
   const [newCardCity, setNewCardCity] = useState("");
   const [newCardOffer, setNewCardOffer] = useState("");
+  const [newCardConnectWith, setNewCardConnectWith] = useState("");
   const [newCardEducation, setNewCardEducation] = useState("");
   const [newCardProjects, setNewCardProjects] = useState("");
   const [newCardWork, setNewCardWork] = useState("");
@@ -516,13 +527,13 @@ export function ProfilePageInner({
     }
     if (!viewing?.name) return;
     try {
-      await openOrCreateConversation(user.id, {
+      const conversationId = await openOrCreateConversation(user.id, {
         userId: viewing.userId,
         username: viewing.name,
         displayName: viewing.name,
         matchTag: viewing.role,
       });
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error(t("messages.sendFailed"), {
         description: error instanceof Error ? error.message : String(error),
@@ -667,6 +678,7 @@ export function ProfilePageInner({
             emoji: "⭐",
             title: card.title,
             desc: card.summary || card.details || cardSupplyFallback,
+            longDetails: card.details,
             tags: card.tags.length ? card.tags : [card.category],
             glow: CARD_GLOWS[i % CARD_GLOWS.length],
             supplySkills: card.supply_skills,
@@ -674,6 +686,7 @@ export function ProfilePageInner({
             supplyCountry: card.supply_country,
             supplyCity: card.supply_city,
             offerSummary: card.offer_summary,
+            connectionPreferences: card.connection_preferences,
             education: card.education,
             projects: card.projects,
             workExperience: card.work_experience,
@@ -899,11 +912,13 @@ export function ProfilePageInner({
     setNewCardEmoji("✨");
     setNewCardTitle("");
     setNewCardDesc("");
+    setNewCardDetails("");
     setNewCardSkills("");
     setNewCardLanguages("");
     setNewCardCountry("");
     setNewCardCity("");
     setNewCardOffer("");
+    setNewCardConnectWith("");
     setNewCardEducation("");
     setNewCardProjects("");
     setNewCardWork("");
@@ -923,11 +938,13 @@ export function ProfilePageInner({
     setNewCardEmoji(c.emoji);
     setNewCardTitle(c.title);
     setNewCardDesc(c.desc === cardSupplyFallback ? "" : c.desc);
+    setNewCardDetails(c.longDetails ?? "");
     setNewCardSkills(joinOptionalList(c.supplySkills));
     setNewCardLanguages(joinOptionalList(c.supplyLanguages));
     setNewCardCountry(c.supplyCountry ?? "");
     setNewCardCity(c.supplyCity ?? "");
     setNewCardOffer(c.offerSummary ?? "");
+    setNewCardConnectWith(c.connectionPreferences ?? "");
     setNewCardEducation(c.education ?? "");
     setNewCardProjects(c.projects ?? "");
     setNewCardWork(c.workExperience ?? "");
@@ -1012,13 +1029,14 @@ export function ProfilePageInner({
           title: newCardTitle.trim(),
           category: "Skill",
           summary: newCardDesc.trim() || cardSupplyFallback,
-          details: newCardDesc.trim() || null,
+          details: newCardDetails.trim() || null,
           tags,
           supply_skills: supplySkills,
           supply_languages: supplyLanguages,
           supply_country: newCardCountry.trim() || null,
           supply_city: newCardCity.trim() || null,
           offer_summary: newCardOffer.trim() || null,
+          connection_preferences: newCardConnectWith.trim() || null,
           education: newCardEducation.trim() || null,
           projects: newCardProjects.trim() || null,
           work_experience: newCardWork.trim() || null,
@@ -1048,12 +1066,14 @@ export function ProfilePageInner({
               emoji: newCardEmoji,
               title: newCardTitle.trim(),
               desc: newCardDesc.trim() || cardSupplyFallback,
+              longDetails: newCardDetails.trim() || null,
               tags,
               supplySkills,
               supplyLanguages,
               supplyCountry: newCardCountry.trim() || null,
               supplyCity: newCardCity.trim() || null,
               offerSummary: newCardOffer.trim() || null,
+              connectionPreferences: newCardConnectWith.trim() || null,
               education: newCardEducation.trim() || null,
               projects: newCardProjects.trim() || null,
               workExperience: newCardWork.trim() || null,
@@ -1073,6 +1093,7 @@ export function ProfilePageInner({
           emoji: newCardEmoji,
           title: newCardTitle.trim(),
           desc: newCardDesc.trim() || cardSupplyFallback,
+          longDetails: newCardDetails.trim() || null,
           tags,
           glow: CARD_GLOWS[realIdentCards.length % CARD_GLOWS.length],
           supplySkills,
@@ -1080,6 +1101,7 @@ export function ProfilePageInner({
           supplyCountry: newCardCountry.trim() || null,
           supplyCity: newCardCity.trim() || null,
           offerSummary: newCardOffer.trim() || null,
+          connectionPreferences: newCardConnectWith.trim() || null,
           education: newCardEducation.trim() || null,
           projects: newCardProjects.trim() || null,
           workExperience: newCardWork.trim() || null,
@@ -1105,12 +1127,14 @@ export function ProfilePageInner({
     setEditingCardIndex(null);
     setNewCardTitle("");
     setNewCardDesc("");
+    setNewCardDetails("");
     setNewCardEmoji("✨");
     setNewCardSkills("");
     setNewCardLanguages("");
     setNewCardCountry("");
     setNewCardCity("");
     setNewCardOffer("");
+    setNewCardConnectWith("");
     setNewCardEducation("");
     setNewCardProjects("");
     setNewCardWork("");
@@ -1587,15 +1611,16 @@ export function ProfilePageInner({
                     className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
                   >
                     {/* Owner: show real identity cards with delete; Viewer: show their skills */}
-                    {(isOwner
-                      ? realIdentCards.length
-                        ? realIdentCards
-                        : identityCards
-                      : realIdentCards.length
-                        ? realIdentCards
-                        : viewingCards.length
-                          ? viewingCards
+                    {(
+                      (isOwner
+                        ? realIdentCards.length
+                          ? realIdentCards
                           : identityCards
+                        : realIdentCards.length
+                          ? realIdentCards
+                          : viewingCards.length
+                            ? viewingCards
+                            : identityCards) as IdentityCardView[]
                     ).map((c, i) => (
                       <IdentityCard
                         key={`${c.title}-${i}`}
@@ -1610,6 +1635,15 @@ export function ProfilePageInner({
                             : undefined
                         }
                         onSave={!isOwner && c.id ? () => void toggleCardSave(c) : undefined}
+                        onOpen={
+                          c.id
+                            ? () =>
+                                navigate({
+                                  to: "/cards/$cardId",
+                                  params: { cardId: c.id as string },
+                                })
+                            : undefined
+                        }
                         saved={c.id ? !!savedCards[c.id] : false}
                       />
                     ))}
@@ -1720,7 +1754,9 @@ export function ProfilePageInner({
                                     onClick={() => void togglePortfolioSave(item)}
                                     className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground"
                                   >
-                                    {savedPortfolioItems[item.id] ? t("social.saved") : t("social.save")}
+                                    {savedPortfolioItems[item.id]
+                                      ? t("social.saved")
+                                      : t("social.save")}
                                   </button>
                                 </div>
                               )}
@@ -1918,12 +1954,25 @@ export function ProfilePageInner({
                   <textarea
                     value={newCardDesc}
                     onChange={(e) => setNewCardDesc(e.target.value)}
-                    rows={3}
+                    rows={2}
                     placeholder={t("card.summaryPlaceholder")}
                     className="mt-1 w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
                   />
                 </div>
-                <details open className="rounded-2xl border border-[var(--border)] bg-white/[0.02] p-3">
+                <div>
+                  <label className="text-xs text-muted-foreground">Detailed description</label>
+                  <textarea
+                    value={newCardDetails}
+                    onChange={(e) => setNewCardDetails(e.target.value)}
+                    rows={4}
+                    placeholder="Explain your supply in more detail: context, strengths, boundaries, and how people can work with you."
+                    className="mt-1 w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                  />
+                </div>
+                <details
+                  open
+                  className="rounded-2xl border border-[var(--border)] bg-white/[0.02] p-3"
+                >
                   <summary className="cursor-pointer text-sm font-medium text-foreground">
                     Basic supply
                   </summary>
@@ -1973,6 +2022,18 @@ export function ProfilePageInner({
                         onChange={(e) => setNewCardOffer(e.target.value)}
                         rows={2}
                         placeholder="Describe the help, resource, or value this card offers."
+                        className="mt-1 w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground">
+                        Who I want to connect with
+                      </label>
+                      <textarea
+                        value={newCardConnectWith}
+                        onChange={(e) => setNewCardConnectWith(e.target.value)}
+                        rows={2}
+                        placeholder="Describe the people, needs, or situations this supply card is best for."
                         className="mt-1 w-full resize-none rounded-xl border border-[var(--border)] bg-white/[0.04] px-3 py-2 text-sm outline-none focus:border-[var(--border-strong)]"
                       />
                     </div>

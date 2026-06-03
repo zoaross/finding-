@@ -7,13 +7,14 @@ export type UserSettingsPayload = {
   privacy_settings?: Record<string, unknown>;
   chat_settings?: Record<string, unknown>;
   ai_preferences?: Record<string, unknown>;
+  appearance_settings?: Record<string, unknown>;
 };
 
 export async function loadUserSettings(userId: string) {
   const { data, error } = await (supabase as any)
     .from("user_settings")
     .select(
-      "app_language, translation_language, notification_settings, privacy_settings, chat_settings, ai_preferences",
+      "app_language, translation_language, notification_settings, privacy_settings, chat_settings, ai_preferences, appearance_settings",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -34,9 +35,9 @@ export async function isSavedUser(userId: string, targetProfileId: string) {
     .select("id")
     .eq("user_id", userId)
     .eq("target_profile_id", targetProfileId)
-    .maybeSingle();
+    .limit(1);
   if (error) throw new Error(error.message);
-  return !!data;
+  return Array.isArray(data) && data.length > 0;
 }
 
 export async function setSavedUser(userId: string, targetProfileId: string, saved: boolean) {
@@ -93,7 +94,22 @@ export async function setSavedCard(userId: string, cardId: string, saved: boolea
   if (error) throw new Error(error.message);
 }
 
-export async function setSavedPortfolioItem(userId: string, portfolioItemId: string, saved: boolean) {
+export async function isSavedCard(userId: string, cardId: string) {
+  const { data, error } = await (supabase as any)
+    .from("saved_cards")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("card_id", cardId)
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return Array.isArray(data) && data.length > 0;
+}
+
+export async function setSavedPortfolioItem(
+  userId: string,
+  portfolioItemId: string,
+  saved: boolean,
+) {
   if (saved) {
     const { error } = await (supabase as any)
       .from("saved_portfolio_items")

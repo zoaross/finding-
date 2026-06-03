@@ -18,6 +18,8 @@ export type ConversationTarget = {
 };
 
 const ACTIVE_MATCH_KEY = "finding:active-match-id";
+export const CONVERSATION_OPENED_EVENT = "finding:conversation-opened";
+export const SYSTEM_MESSAGE_PREFIX = "__finding_system__:";
 
 export function setRequestedMatch(matchId: string) {
   try {
@@ -25,6 +27,15 @@ export function setRequestedMatch(matchId: string) {
   } catch {
     // The conversation still exists even if storage is unavailable.
   }
+}
+
+function notifyConversationOpened(matchId: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(CONVERSATION_OPENED_EVENT, {
+      detail: { matchId },
+    }),
+  );
 }
 
 export function consumeRequestedMatch(): string | null {
@@ -44,10 +55,11 @@ async function findProfileByUsername(
     .from("profiles")
     .select("id, username, is_simulated")
     .eq("username", username)
-    .maybeSingle();
+    .limit(1);
   if (error) throw new Error(error.message);
-  if (!data?.id) return null;
-  return data as { id: string; username: string; is_simulated?: boolean | null };
+  const profile = (data ?? [])[0];
+  if (!profile?.id) return null;
+  return profile as { id: string; username: string; is_simulated?: boolean | null };
 }
 
 async function findProfileById(
@@ -57,10 +69,11 @@ async function findProfileById(
     .from("profiles")
     .select("id, username, is_simulated")
     .eq("id", id)
-    .maybeSingle();
+    .limit(1);
   if (error) throw new Error(error.message);
-  if (!data?.id) return null;
-  return data as { id: string; username: string | null; is_simulated?: boolean | null };
+  const profile = (data ?? [])[0];
+  if (!profile?.id) return null;
+  return profile as { id: string; username: string | null; is_simulated?: boolean | null };
 }
 
 function directConversationId(currentUserId: string, targetUserId: string, needId?: string | null) {
@@ -113,15 +126,34 @@ export async function openOrCreateConversation(
     .from("matches")
     .select("id")
     .eq("conversation_id", conversationId)
-    .maybeSingle();
+    .limit(1);
 
   if (readError) throw new Error(readError.message);
-  if (existing?.id) {
-    if (targetIsSimulated && targetUserId) {
-      await ensureInitialSimulatedReply(existing.id as string, targetUserId, targetName);
+  const existingMatch = (existing ?? [])[0];
+  if (existingMatch?.id) {
+    await (supabase as any)
+      .from("matches")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", existingMatch.id);
+    if (target.needId) {
+      await (supabase as any)
+        .from("matches")
+        .update({ need_id: target.needId, updated_at: new Date().toISOString() })
+        .eq("id", existingMatch.id)
+        .is("need_id", null);
     }
-    setRequestedMatch(existing.id as string);
-    return existing.id as string;
+    await ensureSystemWelcomeMessage(
+      existingMatch.id as string,
+      currentUserId,
+      targetName,
+      target.matchTag,
+    );
+    if (targetIsSimulated && targetUserId) {
+      await ensureInitialSimulatedReply(existingMatch.id as string, targetUserId, targetName);
+    }
+    setRequestedMatch(existingMatch.id as string);
+    notifyConversationOpened(existingMatch.id as string);
+    return existingMatch.id as string;
   }
 
   const { data, error } = await supabase
@@ -142,6 +174,7 @@ export async function openOrCreateConversation(
 
   if (error) throw new Error(error.message);
   if (!data?.id) throw new Error("Conversation was not created.");
+  await ensureSystemWelcomeMessage(data.id as string, currentUserId, targetName, target.matchTag);
   if (target.needId) {
     await (supabase as any)
       .from("needs")
@@ -153,6 +186,7 @@ export async function openOrCreateConversation(
     await ensureInitialSimulatedReply(data.id as string, targetUserId, targetName);
   }
   setRequestedMatch(data.id as string);
+  notifyConversationOpened(data.id as string);
   return data.id as string;
 }
 
@@ -168,12 +202,12 @@ export async function ensureConversation(
     .from("matches")
     .select("id")
     .eq("id", matchId)
-    .maybeSingle();
+    .limit(1);
 
   if (readError) {
     throw new Error(readError.message);
   }
-  if (existing) return;
+  if ((existing ?? []).length > 0) return;
 
   const { error } = await supabase.from("matches").insert({
     id: matchId,
@@ -275,6 +309,45 @@ export async function ensureInitialSimulatedReply(
 
   if (error) {
     console.warn("[chat] initial simulated reply failed:", error.message);
+    return null;
+  }
+  return data as DBMessage;
+}
+
+export async function ensureSystemWelcomeMessage(
+  matchId: string,
+  senderId: string,
+  partnerName = "Finding partner",
+  matchTag?: string | null,
+): Promise<DBMessage | null> {
+  const { data: existing, error: readError } = await supabase
+    .from("messages")
+    .select("id, content")
+    .eq("match_id", matchId)
+    .limit(20);
+
+  if (readError) {
+    console.warn("[chat] system welcome check failed:", readError.message);
+    return null;
+  }
+  const existingMessages = (existing ?? []) as Array<{ content: string }>;
+  if (existingMessages.some((message) => message.content.startsWith(SYSTEM_MESSAGE_PREFIX))) {
+    return null;
+  }
+
+  const tag = matchTag || "Finding match";
+  const { data, error } = await supabase
+    .from("messages")
+    .insert({
+      match_id: matchId,
+      sender_id: senderId,
+      content: `${SYSTEM_MESSAGE_PREFIX}Match accepted with ${partnerName}. Conversation opened from ${tag}.`,
+    })
+    .select("id, match_id, sender_id, content, created_at")
+    .single();
+
+  if (error) {
+    console.warn("[chat] system welcome failed:", error.message);
     return null;
   }
   return data as DBMessage;

@@ -10,8 +10,9 @@ import {
   sendMessage,
   sendSimulatedReply,
   subscribeMessages,
-  getMockMatchId,
   consumeRequestedMatch,
+  CONVERSATION_OPENED_EVENT,
+  SYSTEM_MESSAGE_PREFIX,
   type DBMessage,
 } from "@/lib/chat";
 import {
@@ -34,10 +35,13 @@ import {
   type PortfolioItem,
 } from "@/components/ProfilePreviewModal";
 import { PREF_LANG_KEY, PREF_LANGS, PINNED_LANG_CODES } from "@/routes/settings";
-import { useI18n, useTranslationLanguage } from "@/lib/i18n";
+import { type MvpLanguageCode, useI18n, useTranslationLanguage } from "@/lib/i18n";
 import { blockProfile, reportProfile } from "@/lib/socialActions";
 
 export const Route = createFileRoute("/messages")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    conversationId: typeof search.conversationId === "string" ? search.conversationId : undefined,
+  }),
   component: MessagesPage,
   head: () => ({
     meta: [
@@ -175,10 +179,20 @@ function relTime(iso: string) {
 
 type Message = {
   id: string;
-  from: "me" | "them";
+  from: "me" | "them" | "system";
   text: string;
   time: string;
 };
+
+const NEED_OVERRIDE_KEY = "finding:need-overrides";
+const NEEDS_UPDATED_EVENT = "finding:needs-updated";
+const SUCCESS_TAGS = [
+  "messages.tagSmooth",
+  "messages.tagProfessional",
+  "messages.tagFast",
+  "messages.tagExceeded",
+  "messages.tagRecommend",
+] as const;
 
 const initialThread: Record<string, Message[]> = {
   "1": [
@@ -251,18 +265,21 @@ function NavRail() {
 
 function MessagesPage() {
   const navigate = useNavigate();
+  const { conversationId: searchConversationId } = Route.useSearch();
   const { t } = useI18n();
   const [user, setUser] = useState<User | null>(null);
   const [convs, setConvs] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState("");
+  const [activeConversationId, setActiveConversationId] = useState("");
   const [search, setSearch] = useState("");
   const [draft, setDraft] = useState("");
-  const [thread, setThread] = useState<Message[]>(initialThread["1"]);
+  const [thread, setThread] = useState<Message[]>([]);
+  const [threadLoading, setThreadLoading] = useState(false);
   const [partnerCollapsed, setPartnerCollapsed] = useState(false);
   const [showRating, setShowRating] = useState(false);
   const [rating, setRating] = useState(5);
   const [hoverRating, setHoverRating] = useState(0);
   const [feedback, setFeedback] = useState("");
+  const [successTags, setSuccessTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [completedRatings, setCompletedRatings] = useState<
     Record<string, { rating: number; feedback: string | null; created_at: string }>
@@ -304,7 +321,7 @@ function MessagesPage() {
       const target = localStorage.getItem("finding:open-chat");
       if (target) {
         const match = convs.find((c) => c.name === target);
-        if (match) setActiveId(match.id);
+        if (match) setActiveConversationId(match.id);
         localStorage.removeItem("finding:open-chat");
       }
     } catch {
@@ -323,17 +340,6 @@ function MessagesPage() {
       console.warn("[ratings] load failed:", error.message);
       return;
     }
-    await (supabase as any)
-      .from("matches")
-      .update({ status: "completed", updated_at: new Date().toISOString() })
-      .eq("id", active.id);
-    if (active.needId) {
-      await (supabase as any)
-        .from("needs")
-        .update({ status: "completed", is_archived: true, updated_at: new Date().toISOString() })
-        .eq("id", active.needId)
-        .eq("user_id", user.id);
-    }
     if (!data) return;
     const map: Record<string, { rating: number; feedback: string | null; created_at: string }> = {};
     const completedIds = new Set<string>();
@@ -348,16 +354,16 @@ function MessagesPage() {
     setCompletedRatings(map);
     setConvs((prev) => {
       const next = prev.filter((c) => !completedIds.has(c.id));
-      if (next.length && !next.find((c) => c.id === activeId)) {
-        setActiveId(next[0].id);
+      if (activeConversationId && !next.find((c) => c.id === activeConversationId)) {
+        setActiveConversationId(next[0]?.id ?? "");
       }
       return next;
     });
   };
 
-  const loadRealConversations = async (uid: string) => {
+  const loadRealConversations = async (uid: string, preferredMatchId?: string | null) => {
     // Load matches where current user is a participant
-    const requestedMatchId = consumeRequestedMatch();
+    const requestedMatchId = preferredMatchId ?? consumeRequestedMatch();
     const [r1, r2] = await Promise.all([
       (supabase as any)
         .from("matches")
@@ -365,16 +371,22 @@ function MessagesPage() {
           "id, need_id, participant_two_id, participant_two_profile_id, match_tag, updated_at, partner_name",
         )
         .eq("participant_one_id", uid)
-        .limit(20),
+        .order("updated_at", { ascending: false })
+        .limit(100),
       (supabase as any)
         .from("matches")
         .select("id, need_id, participant_one_id, match_tag, updated_at, partner_name")
         .eq("participant_two_id", uid)
-        .limit(20),
+        .order("updated_at", { ascending: false })
+        .limit(100),
     ]);
     const rows1 = ((r1 as any).data ?? []) as any[];
     const rows2 = ((r2 as any).data ?? []) as any[];
-    if (!rows1.length && !rows2.length) return; // no real matches, keep demo
+    if (!rows1.length && !rows2.length) {
+      setConvs([]);
+      setActiveConversationId("");
+      return;
+    }
 
     // Collect the other participant's ID
     const matchList = [
@@ -396,7 +408,11 @@ function MessagesPage() {
       })),
     ].filter((m) => m.otherId);
 
-    if (!matchList.length) return;
+    if (!matchList.length) {
+      setConvs([]);
+      setActiveConversationId("");
+      return;
+    }
 
     // Load profiles for other participants
     const otherIds = matchList.map((m) => m.otherId as string);
@@ -441,10 +457,12 @@ function MessagesPage() {
 
     // Only show real conversations — no demo fallback
     setConvs(realConvs);
-    if (realConvs.length > 0) {
+    setActiveConversationId((current) => {
       const requested = requestedMatchId ? realConvs.find((c) => c.id === requestedMatchId) : null;
-      setActiveId((requested ?? realConvs[0]).id);
-    }
+      if (requested) return requested.id;
+      if (current && realConvs.some((c) => c.id === current)) return current;
+      return realConvs[0]?.id ?? "";
+    });
   };
 
   useEffect(() => {
@@ -453,7 +471,7 @@ function MessagesPage() {
       if (!s?.user) navigate({ to: "/auth" });
       else {
         loadRatings(s.user.id);
-        void loadRealConversations(s.user.id);
+        void loadRealConversations(s.user.id, searchConversationId);
       }
     });
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -461,32 +479,54 @@ function MessagesPage() {
       if (!session?.user) navigate({ to: "/auth" });
       else {
         loadRatings(session.user.id);
-        void loadRealConversations(session.user.id);
+        void loadRealConversations(session.user.id, searchConversationId);
       }
     });
     return () => sub.subscription.unsubscribe();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigate]);
+  }, [navigate, searchConversationId]);
+
+  useEffect(() => {
+    if (!user || !searchConversationId) return;
+    setActiveConversationId(searchConversationId);
+    void loadRealConversations(user.id, searchConversationId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, searchConversationId]);
+
+  useEffect(() => {
+    if (!user) return;
+    const onConversationOpened = (event: Event) => {
+      const matchId = (event as CustomEvent<{ matchId?: string }>).detail?.matchId ?? null;
+      void loadRealConversations(user.id, matchId);
+    };
+    window.addEventListener(CONVERSATION_OPENED_EVENT, onConversationOpened);
+    window.addEventListener("storage", onConversationOpened);
+    return () => {
+      window.removeEventListener(CONVERSATION_OPENED_EVENT, onConversationOpened);
+      window.removeEventListener("storage", onConversationOpened);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Load history from DB + subscribe to realtime inserts whenever the
-  // active conversation changes. Falls back to the seeded demo thread
-  // (luna_bjd) for first-time users so the UI never looks empty.
+  // active conversation changes. The selected conversation is driven only
+  // by activeConversationId, so the left list, main thread and partner panel
+  // cannot drift to different users.
   useEffect(() => {
     setTranslations({});
-    if (!user) return;
-    // Real conversations have UUID IDs (contain "-"); demo ones use "1","2",etc.
-    const isRealConv = activeId.includes("-");
-    const matchId = isRealConv ? activeId : getMockMatchId(activeId);
+    setProfile(null);
+    setShowBlock(false);
+    setShowReport(false);
+    setConfirmAction(null);
+    setShowRating(false);
+    setThread([]);
+    if (!user || !activeConversationId) {
+      setThreadLoading(false);
+      return;
+    }
+    const matchId = activeConversationId;
     let cancelled = false;
-
-    const seed = initialThread[activeId] ?? [
-      {
-        id: "seed-greet",
-        from: "them" as const,
-        text: "你好!很高兴遇到你 ✨",
-        time: t("time.now"),
-      },
-    ];
+    setThreadLoading(true);
 
     const fmtTime = (iso: string) => {
       try {
@@ -496,18 +536,21 @@ function MessagesPage() {
       }
     };
 
-    const toMessage = (m: DBMessage): Message => ({
-      id: m.id,
-      from: m.sender_id === user.id ? "me" : "them",
-      text: m.content,
-      time: fmtTime(m.created_at),
-    });
+    const toMessage = (m: DBMessage): Message => {
+      const isSystem = m.content.startsWith(SYSTEM_MESSAGE_PREFIX);
+      return {
+        id: m.id,
+        from: isSystem ? "system" : m.sender_id === user.id ? "me" : "them",
+        text: isSystem ? m.content.slice(SYSTEM_MESSAGE_PREFIX.length) : m.content,
+        time: fmtTime(m.created_at),
+      };
+    };
 
     void listMessages(matchId).then((rows) => {
       if (cancelled) return;
       const dbMsgs = rows.map(toMessage);
-      // Show seeded thread only if the DB has nothing yet for this conv.
-      setThread(dbMsgs.length ? dbMsgs : seed);
+      setThread(dbMsgs);
+      setThreadLoading(false);
     });
 
     const unsub = subscribeMessages(matchId, (m) => {
@@ -524,7 +567,7 @@ function MessagesPage() {
       cancelled = true;
       unsub();
     };
-  }, [activeId, user]);
+  }, [activeConversationId, user, t]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -537,9 +580,8 @@ function MessagesPage() {
       toast.error(t("messages.signInRequired"));
       return;
     }
-    // Real conversations use their own UUID; demo conversations get a stable UUID via getMockMatchId
-    const isRealConv = activeId.includes("-");
-    const matchId = isRealConv ? activeId : getMockMatchId(activeId);
+    if (!active) return;
+    const matchId = activeConversationId;
     // Optimistic append so the bubble shows instantly.
     const tempId = `local-${Date.now()}`;
     setThread((p) => [...p, { id: tempId, from: "me", text, time: t("time.now") }]);
@@ -577,7 +619,7 @@ function MessagesPage() {
     );
     setConvs((prev) =>
       prev.map((c) =>
-        c.id === activeId ? { ...c, preview: saved.content.slice(0, 30), time: t("time.now") } : c,
+        c.id === activeConversationId ? { ...c, preview: saved.content.slice(0, 30), time: t("time.now") } : c,
       ),
     );
 
@@ -602,7 +644,7 @@ function MessagesPage() {
           });
           setConvs((prev) =>
             prev.map((c) =>
-              c.id === activeId
+              c.id === activeConversationId
                 ? { ...c, preview: reply.content.slice(0, 30), time: t("time.now"), unread: 1 }
                 : c,
             ),
@@ -612,16 +654,18 @@ function MessagesPage() {
     }
   };
 
-  // active is only used when convs.length > 0; the JSX guards this
-  const active = convs.find((c) => c.id === activeId) ?? convs[0] ?? ({} as Conversation);
+  const active = convs.find((c) => c.id === activeConversationId) ?? null;
   const filtered = convs.filter(
     (c) =>
       !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.matchTag.includes(search),
   );
 
-  const handleComplete = () => setConfirmAction("complete");
+  const handleComplete = () => {
+    if (!active) return;
+    setConfirmAction("complete");
+  };
   const confirmBlockUser = async () => {
-    if (!user || !active.userId) {
+    if (!user || !active?.userId) {
       toast.error(t("messages.signInRequired"));
       return;
     }
@@ -629,8 +673,8 @@ function MessagesPage() {
       await blockProfile(user.id, active.userId, "blocked_from_messages");
       setShowBlock(false);
       setConvs((prev) => {
-        const next = prev.filter((c) => c.id !== activeId);
-        if (next.length) setActiveId(next[0].id);
+        const next = prev.filter((c) => c.id !== activeConversationId);
+        setActiveConversationId(next[0]?.id ?? "");
         return next;
       });
       toast.success(t("messages.blockedToast"));
@@ -642,7 +686,7 @@ function MessagesPage() {
   };
 
   const submitReport = async () => {
-    if (!user || !active.userId) {
+    if (!user || !active?.userId) {
       toast.error(t("messages.signInRequired"));
       return;
     }
@@ -662,66 +706,143 @@ function MessagesPage() {
     setConfirmAction(null);
     setShowRating(true);
   };
+
+  const markNeedCompletedLocally = (needId: string) => {
+    try {
+      const current = JSON.parse(localStorage.getItem(NEED_OVERRIDE_KEY) || "{}");
+      localStorage.setItem(
+        NEED_OVERRIDE_KEY,
+        JSON.stringify({ ...current, [needId]: "completed" }),
+      );
+      window.dispatchEvent(new CustomEvent(NEEDS_UPDATED_EVENT, { detail: { needId } }));
+    } catch {
+      // Database is still the source of truth; local sync is best-effort.
+    }
+  };
+
   const submitRating = async () => {
-    if (!user) {
+    if (!user || !active) {
       toast.error(t("messages.signInRequired"));
       return;
     }
     setSubmitting(true);
+    const now = new Date().toISOString();
+    const cleanFeedback = feedback.trim();
     const payload = {
       rater_id: user.id,
       conversation_id: active.id,
+      need_id: active.needId || null,
+      partner_profile_id: active.userId || null,
       partner_name: active.name,
       match_tag: active.matchTag,
       rating,
-      feedback: feedback.trim() || null,
+      feedback: cleanFeedback || null,
+      success_tags: successTags,
       status: "completed",
+    };
+    const legacyPayload = {
+      rater_id: payload.rater_id,
+      conversation_id: payload.conversation_id,
+      partner_name: payload.partner_name,
+      match_tag: payload.match_tag,
+      rating: payload.rating,
+      feedback: payload.feedback,
+      status: payload.status,
     };
     const { error } = await supabase
       .from("conversation_ratings")
       .upsert(payload, { onConflict: "rater_id,conversation_id" });
-    setSubmitting(false);
     if (error) {
-      console.error("[ratings] save failed:", error);
-      toast.error(t("messages.ratingSaveFailed"), {
-        description: error.message.includes("does not exist")
-          ? t("messages.ratingTableMissing")
-          : error.message,
-      });
+      const canFallback =
+        error.message.includes("need_id") ||
+        error.message.includes("partner_profile_id") ||
+        error.message.includes("success_tags");
+      if (canFallback) {
+        const { error: legacyError } = await supabase
+          .from("conversation_ratings")
+          .upsert(legacyPayload, { onConflict: "rater_id,conversation_id" });
+        if (legacyError) {
+          setSubmitting(false);
+          console.error("[ratings] save failed:", legacyError);
+          toast.error(t("messages.ratingSaveFailed"), {
+            description: legacyError.message.includes("does not exist")
+              ? t("messages.ratingTableMissing")
+              : legacyError.message,
+          });
+          return;
+        }
+      } else {
+        setSubmitting(false);
+        console.error("[ratings] save failed:", error);
+        toast.error(t("messages.ratingSaveFailed"), {
+          description: error.message.includes("does not exist")
+            ? t("messages.ratingTableMissing")
+            : error.message,
+        });
+        return;
+      }
+    }
+
+    const { error: matchError } = await (supabase as any)
+      .from("matches")
+      .update({ status: "completed", updated_at: now })
+      .eq("id", active.id);
+    if (matchError) {
+      setSubmitting(false);
+      toast.error(t("messages.ratingSaveFailed"), { description: matchError.message });
       return;
     }
+
+    if (active.needId) {
+      const { error: needError } = await (supabase as any)
+        .from("needs")
+        .update({ status: "completed", is_archived: true, updated_at: now })
+        .eq("id", active.needId)
+        .eq("user_id", user.id);
+      if (needError) {
+        setSubmitting(false);
+        toast.error(t("messages.ratingSaveFailed"), { description: needError.message });
+        return;
+      }
+      await (supabase as any).from("need_feedback").insert({
+        user_id: user.id,
+        need_id: active.needId,
+        event_type: "complete",
+        reason: successTags[0] || "completed_from_chat",
+        feedback: cleanFeedback || null,
+      });
+      markNeedCompletedLocally(active.needId);
+    }
+    setSubmitting(false);
     setCompletedRatings((m) => ({
       ...m,
       [active.id]: {
         rating,
-        feedback: feedback.trim() || null,
-        created_at: new Date().toISOString(),
+        feedback: cleanFeedback || null,
+        created_at: now,
       },
     }));
-    // Push to needs page queue → moves a need to "已归档"
-    try {
-      const q = JSON.parse(localStorage.getItem("finding:pending-need-status") || "[]");
-      q.push("completed");
-      localStorage.setItem("finding:pending-need-status", JSON.stringify(q));
-    } catch {
-      /* ignore */
-    }
     toast.success(t("messages.collaborationCompleted"), {
       description: t("messages.collaborationRated", { name: active.name, rating }),
     });
     setShowRating(false);
     setFeedback("");
+    setSuccessTags([]);
     setRating(5);
     setHoverRating(0);
     // Mark conversation as completed by removing it
     setConvs((prev) => {
-      const next = prev.filter((c) => c.id !== activeId);
-      if (next.length) setActiveId(next[0].id);
+      const next = prev.filter((c) => c.id !== activeConversationId);
+      setActiveConversationId(next[0]?.id ?? "");
       return next;
     });
   };
-  const handleMismatch = () => setConfirmAction("mismatch");
+  const handleMismatch = () => {
+    if (!active) return;
+    setConfirmAction("mismatch");
+  };
   const confirmMismatch = () => {
+    if (!active) return;
     setConfirmAction(null);
     if (active.needId && user) {
       void (supabase as any)
@@ -731,8 +852,8 @@ function MessagesPage() {
         .eq("user_id", user.id);
     }
     setConvs((prev) => {
-      const next = prev.filter((c) => c.id !== activeId);
-      if (next.length) setActiveId(next[0].id);
+      const next = prev.filter((c) => c.id !== activeConversationId);
+      setActiveConversationId(next[0]?.id ?? "");
       return next;
     });
     // Push to needs page queue → moves a need to "未完成"
@@ -775,7 +896,7 @@ function MessagesPage() {
   };
 
   const toggleTranslate = (msg: Message, langCode?: string) => {
-    const target = langCode || convLang[activeId] || translationLanguage;
+    const target = langCode || convLang[activeConversationId] || translationLanguage;
     setTranslations((prev) => {
       const next = { ...prev };
       if (next[msg.id] && !langCode) {
@@ -791,7 +912,7 @@ function MessagesPage() {
   // If every them-message is already translated → hide all (toggle off).
   // Otherwise translate every them-message (including any not yet translated).
   const translateAll = (langCode?: string) => {
-    const target = langCode || convLang[activeId] || translationLanguage;
+    const target = langCode || convLang[activeConversationId] || translationLanguage;
     const themMsgs = thread.filter((m) => m.from === "them");
     if (themMsgs.length === 0) {
       toast.info(t("messages.noTranslate"));
@@ -841,6 +962,7 @@ function MessagesPage() {
   };
 
   const openActiveProfile = (scrollTag?: string) => {
+    if (!active) return;
     setProfile({
       userId: active.userId,
       name: active.name,
@@ -856,6 +978,7 @@ function MessagesPage() {
   };
 
   const openPartnerFullProfile = () => {
+    if (!active) return;
     try {
       localStorage.setItem(
         "finding:viewing-profile",
@@ -914,15 +1037,15 @@ function MessagesPage() {
             {filtered.map((c) => (
               <button
                 key={c.id}
-                onClick={() => setActiveId(c.id)}
+                onClick={() => setActiveConversationId(c.id)}
                 title={c.name}
                 className={`group relative flex w-full items-center gap-3 px-3 py-3 text-left transition ${
-                  c.id === activeId
+                  c.id === activeConversationId
                     ? "bg-gradient-to-r from-primary/15 to-transparent"
                     : "hover:bg-white/5"
                 }`}
               >
-                {c.id === activeId && (
+                {c.id === activeConversationId && (
                   <motion.span
                     layoutId="active-conv"
                     className="absolute inset-y-2 left-0 w-0.5 rounded-r-full bg-primary shadow-[0_0_12px_oklch(0.65_0.22_295)]"
@@ -930,7 +1053,7 @@ function MessagesPage() {
                 )}
                 <div className="relative shrink-0">
                   <div
-                    className={`flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-primary/40 to-fuchsia-500/30 text-xl shadow-inner transition-all ${c.id === activeId ? "ring-2 ring-primary/60" : ""}`}
+                    className={`flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-primary/40 to-fuchsia-500/30 text-xl shadow-inner transition-all ${c.id === activeConversationId ? "ring-2 ring-primary/60" : ""}`}
                   >
                     {c.emoji}
                   </div>
@@ -963,7 +1086,7 @@ function MessagesPage() {
 
         {/* Chat window — show empty state when no conversations */}
         <main className="flex min-w-0 flex-1 flex-col">
-          {!activeId && (
+          {!active && (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center p-8">
               <div className="grid h-20 w-20 place-items-center rounded-full border border-white/10 bg-white/5 text-4xl">
                 ✦
@@ -975,7 +1098,7 @@ function MessagesPage() {
             </div>
           )}
           {/* Chat header — only when active conversation selected */}
-          {convs.length > 0 && (
+          {active && (
             <header className="flex items-center justify-between border-b border-white/5 bg-card/20 px-6 py-4 backdrop-blur-xl">
               <button
                 onClick={() => openActiveProfile()}
@@ -1016,27 +1139,46 @@ function MessagesPage() {
           )}
 
           {/* Messages — only show when active conversation selected */}
-          {convs.length > 0 && (
+          {active && (
             <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-6 py-6">
               <div className="mx-auto w-fit rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] text-muted-foreground backdrop-blur">
                 {t("messages.connectedThrough")}
               </div>
-              <AnimatePresence initial={false}>
-                {thread.map((m) => (
+              {threadLoading ? (
+                <div className="flex justify-center py-12 text-sm text-muted-foreground">
+                  {t("messages.loadingThread")}
+                </div>
+              ) : (
+                <AnimatePresence initial={false}>
+                  {thread.map((m) => (
                   <motion.div
                     key={m.id}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}
+                    className={`flex ${
+                      m.from === "system"
+                        ? "justify-center"
+                        : m.from === "me"
+                          ? "justify-end"
+                          : "justify-start"
+                    }`}
                   >
                     <div
-                      className={`flex max-w-[70%] flex-col gap-1 ${m.from === "me" ? "items-end" : "items-start"}`}
+                      className={`flex max-w-[70%] flex-col gap-1 ${
+                        m.from === "system"
+                          ? "items-center"
+                          : m.from === "me"
+                            ? "items-end"
+                            : "items-start"
+                      }`}
                     >
                       <div
                         className={
-                          m.from === "me"
-                            ? "rounded-2xl rounded-br-md bg-gradient-to-br from-primary via-fuchsia-500 to-purple-600 px-4 py-2.5 text-sm text-white shadow-[0_8px_30px_-10px_oklch(0.55_0.25_300/0.6)]"
-                            : "rounded-2xl rounded-bl-md border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-foreground backdrop-blur-xl"
+                          m.from === "system"
+                            ? "rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-center text-xs text-muted-foreground backdrop-blur"
+                            : m.from === "me"
+                              ? "rounded-2xl rounded-br-md bg-gradient-to-br from-primary via-fuchsia-500 to-purple-600 px-4 py-2.5 text-sm text-white shadow-[0_8px_30px_-10px_oklch(0.55_0.25_300/0.6)]"
+                              : "rounded-2xl rounded-bl-md border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-foreground backdrop-blur-xl"
                         }
                       >
                         {m.text}
@@ -1048,14 +1190,15 @@ function MessagesPage() {
                       )}
                       <span className="px-1 text-[10px] text-muted-foreground/70">{m.time}</span>
                     </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              )}
             </div>
           )}
 
           {/* Input + actions — only show when active */}
-          {convs.length > 0 && (
+          {active && (
             <div className="border-t border-white/5 bg-card/30 px-6 py-4 backdrop-blur-xl">
               <div className="mb-3 flex items-center gap-2">
                 <button
@@ -1104,7 +1247,7 @@ function MessagesPage() {
                   const themMsgs = thread.filter((m) => m.from === "them");
                   const allShown = themMsgs.length > 0 && themMsgs.every((m) => translations[m.id]);
                   const currentLang =
-                    PREF_LANGS.find((l) => l.code === (convLang[activeId] || translationLanguage))
+                    PREF_LANGS.find((l) => l.code === (convLang[activeConversationId] || translationLanguage))
                       ?.label ?? "中文";
                   return (
                     <>
@@ -1119,7 +1262,7 @@ function MessagesPage() {
                             return;
                           }
                           // First-ever use: prompt for language. Otherwise translate every message directly.
-                          if (!convLang[activeId] && !hasChosenLang) {
+                          if (!convLang[activeConversationId] && !hasChosenLang) {
                             setLangSearch("");
                             setShowLangPicker(true);
                           } else {
@@ -1175,7 +1318,7 @@ function MessagesPage() {
 
         {/* Partner panel */}
         <AnimatePresence initial={false}>
-          {!partnerCollapsed && (
+          {active && !partnerCollapsed && (
             <motion.aside
               initial={{ width: 0, opacity: 0 }}
               animate={{ width: 300, opacity: 1 }}
@@ -1293,7 +1436,7 @@ function MessagesPage() {
 
       {/* Rating modal */}
       <AnimatePresence>
-        {showRating && (
+        {showRating && active && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1376,24 +1519,28 @@ function MessagesPage() {
 
                 {/* Quick tags */}
                 <div className="mt-5 flex flex-wrap justify-center gap-2">
-                  {[
-                    t("messages.tagSmooth"),
-                    t("messages.tagProfessional"),
-                    t("messages.tagFast"),
-                    t("messages.tagExceeded"),
-                    t("messages.tagRecommend"),
-                  ].map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() =>
-                        setFeedback((f) => (f.includes(t) ? f : (f ? f + " · " : "") + t))
-                      }
-                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-muted-foreground transition hover:border-primary/30 hover:bg-primary/10 hover:text-foreground"
-                    >
-                      + {t}
-                    </button>
-                  ))}
+                  {SUCCESS_TAGS.map((tagKey) => {
+                    const label = t(tagKey);
+                    const selected = successTags.includes(label);
+                    return (
+                      <button
+                        key={tagKey}
+                        type="button"
+                        onClick={() =>
+                          setSuccessTags((prev) =>
+                            selected ? prev.filter((x) => x !== label) : [...prev, label],
+                          )
+                        }
+                        className={`rounded-full border px-3 py-1 text-xs transition ${
+                          selected
+                            ? "border-primary/50 bg-primary/15 text-foreground"
+                            : "border-white/10 bg-white/5 text-muted-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-foreground"
+                        }`}
+                      >
+                        {selected ? "✓" : "+"} {label}
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {/* Feedback */}
@@ -1480,7 +1627,7 @@ function MessagesPage() {
 
       {/* Block user modal */}
       <AnimatePresence>
-        {showBlock && (
+        {showBlock && active && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1520,7 +1667,7 @@ function MessagesPage() {
 
       {/* Report user modal */}
       <AnimatePresence>
-        {showReport && (
+        {showReport && active && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1652,14 +1799,14 @@ function MessagesPage() {
                   const rest = PREF_LANGS.filter((l) => !PINNED_LANG_CODES.includes(l.code)).filter(
                     match,
                   );
-                  const current = convLang[activeId] || translationLanguage;
-                  const Row = ({ l }: { l: { code: string; label: string } }) => {
+                  const current = convLang[activeConversationId] || translationLanguage;
+                  const Row = ({ l }: { l: { code: MvpLanguageCode; label: string } }) => {
                     const active = current === l.code;
                     return (
                       <button
                         key={l.code}
                         onClick={() => {
-                          setConvLang((p) => ({ ...p, [activeId]: l.code }));
+                          setConvLang((p) => ({ ...p, [activeConversationId]: l.code }));
                           // Update preferred language so the badge + settings stay in sync
                           setTranslationLanguage(l.code);
                           setHasChosenLang(true);

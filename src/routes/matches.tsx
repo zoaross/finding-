@@ -233,14 +233,14 @@ function MatchesPage() {
       return;
     }
     try {
-      await openOrCreateConversation(currentUser.id, {
+      const conversationId = await openOrCreateConversation(currentUser.id, {
         userId: match.profileId,
         username: match.username,
         displayName: match.username,
         matchTag: match.title,
       });
       toast.success(`已为你打开与 ${match.name} 的对话`);
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error("无法创建对话", {
         description: error instanceof Error ? error.message : String(error),

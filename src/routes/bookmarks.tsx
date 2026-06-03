@@ -368,14 +368,14 @@ function BookmarksPage() {
       return;
     }
     try {
-      await openOrCreateConversation(user.id, {
+      const conversationId = await openOrCreateConversation(user.id, {
         userId: need.userId,
         username: need.name,
         displayName: need.name,
         matchTag: need.content,
         needId: need.id,
       });
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error(t("settings.saveFailed"), {
         description: error instanceof Error ? error.message : String(error),
@@ -386,13 +386,13 @@ function BookmarksPage() {
   const openSavedUserChat = async (savedUser: SavedUser) => {
     if (!user) return;
     try {
-      await openOrCreateConversation(user.id, {
+      const conversationId = await openOrCreateConversation(user.id, {
         userId: savedUser.id,
         username: savedUser.name,
         displayName: savedUser.name,
         matchTag: savedUser.identities[0],
       });
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error(t("settings.saveFailed"), {
         description: error instanceof Error ? error.message : String(error),
@@ -862,13 +862,32 @@ function SavedCardView({
         ))}
       </div>
       <div className="mt-5 border-t border-[var(--border)] pt-4">
-        <Link
-          to="/user/$username"
-          params={{ username: card.ownerName }}
-          className="inline-flex w-full items-center justify-center gap-1 rounded-full border border-[var(--border-strong)] px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-white/5"
-        >
-          {t("bookmarks.viewCard")}
-        </Link>
+        <div className="grid gap-2">
+          {card.source === "identity_card" ? (
+            <Link
+              to="/cards/$cardId"
+              params={{ cardId: card.id }}
+              className="inline-flex w-full items-center justify-center gap-1 rounded-full border border-[var(--border-strong)] px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-white/5"
+            >
+              {t("bookmarks.viewCard")}
+            </Link>
+          ) : (
+            <Link
+              to="/user/$username"
+              params={{ username: card.ownerName }}
+              className="inline-flex w-full items-center justify-center gap-1 rounded-full border border-[var(--border-strong)] px-3.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-white/5"
+            >
+              View portfolio owner
+            </Link>
+          )}
+          <Link
+            to="/user/$username"
+            params={{ username: card.ownerName }}
+            className="inline-flex w-full items-center justify-center gap-1 rounded-full border border-[var(--border)] px-3.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-white/5 hover:text-foreground"
+          >
+            View owner profile
+          </Link>
+        </div>
       </div>
     </motion.div>
   );

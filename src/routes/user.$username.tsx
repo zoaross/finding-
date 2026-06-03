@@ -35,7 +35,9 @@ function UserProfilePage() {
       // 1. Fetch real profile from DB by username
       const { data } = await (supabase as any)
         .from("profiles")
-        .select("id, username, bio, location, avatar_emoji, skills, reputation_score")
+        .select(
+          "id, username, bio, location, country, city, region, show_region, avatar_emoji, skills, reputation_score",
+        )
         .eq("username", username)
         .maybeSingle();
 
@@ -46,7 +48,13 @@ function UserProfilePage() {
         setViewing({
           name: (data.username as string) || username,
           emoji: (data.avatar_emoji as string) ?? undefined,
-          region: (data.location as string) ?? undefined,
+          region:
+            data.show_region === false
+              ? undefined
+              : ([data.city, data.country].filter(Boolean).join(", ") ||
+                (data.region as string) ||
+                (data.location as string) ||
+                undefined),
           role: skills.length > 0 ? skills[0] : "Finding 用户",
           bio: (data.bio as string) ?? undefined,
           skills,

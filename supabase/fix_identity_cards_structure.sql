@@ -9,6 +9,7 @@ alter table public.information_cards
   add column if not exists supply_country text,
   add column if not exists supply_city text,
   add column if not exists offer_summary text,
+  add column if not exists connection_preferences text,
   add column if not exists education text,
   add column if not exists projects text,
   add column if not exists work_experience text,
@@ -30,5 +31,14 @@ create index if not exists idx_information_cards_supply_skills
 
 create index if not exists idx_information_cards_supply_languages
   on public.information_cards using gin(supply_languages);
+
+delete from public.saved_cards a
+using public.saved_cards b
+where a.ctid < b.ctid
+  and a.user_id = b.user_id
+  and a.card_id = b.card_id;
+
+create unique index if not exists saved_cards_user_card_unique
+  on public.saved_cards(user_id, card_id);
 
 notify pgrst, 'reload schema';

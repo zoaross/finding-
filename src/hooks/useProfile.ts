@@ -11,6 +11,11 @@ export type Profile = {
   location: string | null;
   country: string | null;
   city: string | null;
+  region: string | null;
+  latitude_rounded: number | null;
+  longitude_rounded: number | null;
+  location_accuracy_meters: number | null;
+  show_region: boolean | null;
   language: string | null;
   skills: string[] | null;
   reputation_score: number | null;
@@ -28,6 +33,11 @@ const empty = (id: string): Profile => ({
   location: null,
   country: null,
   city: null,
+  region: null,
+  latitude_rounded: null,
+  longitude_rounded: null,
+  location_accuracy_meters: null,
+  show_region: true,
   language: null,
   skills: null,
   reputation_score: null,
@@ -55,7 +65,7 @@ export function useProfile(user: User | null) {
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "id, username, avatar_url, avatar_emoji, bio, location, country, city, language, skills, reputation_score, birth_date, is_adult_verified, created_at",
+        "id, username, avatar_url, avatar_emoji, bio, location, country, city, region, latitude_rounded, longitude_rounded, location_accuracy_meters, show_region, language, skills, reputation_score, birth_date, is_adult_verified, created_at",
       )
       .eq("id", user.id)
       .maybeSingle();

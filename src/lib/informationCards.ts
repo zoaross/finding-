@@ -14,6 +14,7 @@ export type InformationCard = {
   supply_country: string | null;
   supply_city: string | null;
   offer_summary: string | null;
+  connection_preferences: string | null;
   education: string | null;
   projects: string | null;
   work_experience: string | null;
@@ -38,6 +39,7 @@ export type InformationCardInput = {
   supply_country?: string | null;
   supply_city?: string | null;
   offer_summary?: string | null;
+  connection_preferences?: string | null;
   education?: string | null;
   projects?: string | null;
   work_experience?: string | null;
@@ -55,7 +57,7 @@ export async function loadInformationCards(userId: string): Promise<InformationC
   const { data, error } = await (supabase as any)
     .from("information_cards")
     .select(
-      "id, user_id, title, category, summary, details, tags, supply_skills, supply_languages, supply_country, supply_city, offer_summary, education, projects, work_experience, places_lived, proof_links, proof_note, media_urls, voice_intro_url, visibility, created_at, updated_at",
+      "id, user_id, title, category, summary, details, tags, supply_skills, supply_languages, supply_country, supply_city, offer_summary, connection_preferences, education, projects, work_experience, places_lived, proof_links, proof_note, media_urls, voice_intro_url, visibility, created_at, updated_at",
     )
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
@@ -81,6 +83,7 @@ export async function saveInformationCard(
     supply_country: input.supply_country?.trim() || null,
     supply_city: input.supply_city?.trim() || null,
     offer_summary: input.offer_summary?.trim() || null,
+    connection_preferences: input.connection_preferences?.trim() || null,
     education: input.education?.trim() || null,
     projects: input.projects?.trim() || null,
     work_experience: input.work_experience?.trim() || null,
@@ -99,7 +102,7 @@ export async function saveInformationCard(
 
   const { data, error } = await query
     .select(
-      "id, user_id, title, category, summary, details, tags, supply_skills, supply_languages, supply_country, supply_city, offer_summary, education, projects, work_experience, places_lived, proof_links, proof_note, media_urls, voice_intro_url, visibility, created_at, updated_at",
+      "id, user_id, title, category, summary, details, tags, supply_skills, supply_languages, supply_country, supply_city, offer_summary, connection_preferences, education, projects, work_experience, places_lived, proof_links, proof_note, media_urls, voice_intro_url, visibility, created_at, updated_at",
     )
     .single();
   if (error) throw error;
@@ -143,6 +146,7 @@ function normalizeCard(row: any): InformationCard {
     supply_country: row.supply_country ?? null,
     supply_city: row.supply_city ?? null,
     offer_summary: row.offer_summary ?? null,
+    connection_preferences: row.connection_preferences ?? null,
     education: row.education ?? null,
     projects: row.projects ?? null,
     work_experience: row.work_experience ?? null,

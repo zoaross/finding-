@@ -174,7 +174,7 @@ function HomePage() {
       return;
     }
     try {
-      await openOrCreateConversation(user.id, {
+      const conversationId = await openOrCreateConversation(user.id, {
         userId: target?.userId,
         username: name,
         displayName: name,
@@ -182,7 +182,7 @@ function HomePage() {
         matchTag: target?.matchTag,
       });
       toast.success(t("home.chatOpened", { name }));
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error(t("messages.sendFailed"), {
         description: error instanceof Error ? error.message : String(error),

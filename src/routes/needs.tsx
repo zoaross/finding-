@@ -71,6 +71,7 @@ type FilterKey = (typeof FILTERS)[number]["key"];
 const OVERRIDE_KEY = "finding:need-overrides";
 const QUEUE_KEY = "finding:pending-need-status";
 const RATING_KEY = "finding:need-ratings";
+const NEEDS_UPDATED_EVENT = "finding:needs-updated";
 
 function readOverrides(): Record<string, LocalStatus> {
   try {
@@ -275,6 +276,16 @@ function NeedsPage() {
   useEffect(() => {
     setOverrides(readOverrides());
     setRatings(readRatings());
+  }, []);
+
+  useEffect(() => {
+    const syncOverrides = () => setOverrides(readOverrides());
+    window.addEventListener(NEEDS_UPDATED_EVENT, syncOverrides);
+    window.addEventListener("storage", syncOverrides);
+    return () => {
+      window.removeEventListener(NEEDS_UPDATED_EVENT, syncOverrides);
+      window.removeEventListener("storage", syncOverrides);
+    };
   }, []);
 
   // Apply queued chat actions (from messages page) to oldest active needs

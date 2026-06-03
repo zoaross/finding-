@@ -6,7 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { StarField } from "@/components/StarField";
 import { openOrCreateConversation } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
-import { setSavedNeed } from "@/lib/socialActions";
+import { loadUserSettings, setSavedNeed } from "@/lib/socialActions";
 import { useI18n } from "@/lib/i18n";
 import {
   FindingMark,
@@ -77,6 +77,13 @@ export type NeedItem = {
   heat: number;
   region: Exclude<Region, "all">;
   city: string;
+  country?: string | null;
+};
+
+type NearbyLocation = {
+  country: string | null;
+  city: string | null;
+  region: string | null;
 };
 
 // Empty export — real data loaded from DB; kept for SearchDropdown import
@@ -287,6 +294,33 @@ function inferRegion(intent: Record<string, unknown> | null): Exclude<Region, "a
   return "其他";
 }
 
+function inferRegionFromLocation(...parts: Array<string | null | undefined>): Exclude<Region, "all"> {
+  const txt = parts.filter(Boolean).join(" ");
+  if (/韩国|首尔|korea|seoul/i.test(txt)) return "韩国";
+  if (/日本|东京|japan|tokyo/i.test(txt)) return "日本";
+  if (/美国|纽约|旧金山|usa|america|united states/i.test(txt)) return "美国";
+  if (/欧洲|柏林|伦敦|巴黎|europe|berlin|london|paris|germany|france|uk/i.test(txt)) {
+    return "欧洲";
+  }
+  if (/东南亚|新加坡|singapore|thailand|vietnam|indonesia|malaysia/i.test(txt)) {
+    return "东南亚";
+  }
+  return "其他";
+}
+
+function nearbyRank(need: NeedItem, nearby: NearbyLocation | null) {
+  if (!nearby) return 0;
+  const city = nearby.city?.toLowerCase();
+  const country = nearby.country?.toLowerCase();
+  const region = nearby.region?.toLowerCase();
+  let score = 0;
+  if (city && need.city.toLowerCase() === city) score += 6;
+  if (country && need.country?.toLowerCase() === country) score += 4;
+  if (region && need.region.toLowerCase().includes(region)) score += 2;
+  if (nearby.country && need.region === inferRegionFromLocation(nearby.country)) score += 1;
+  return score;
+}
+
 function useCounter(target: number, duration = 1500) {
   const [v, setV] = useState(0);
   useEffect(() => {
@@ -321,6 +355,7 @@ function DiscoverPage() {
   const [dbNeeds, setDbNeeds] = useState<NeedItem[]>([]);
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set());
   const [displayCities, setDisplayCities] = useState<GlobeCity[]>(CITY_POSITIONS);
+  const [nearbyLocation, setNearbyLocation] = useState<NearbyLocation | null>(null);
 
   const loadBookmarkedIds = async (uid: string) => {
     const { data } = await (supabase as any)
@@ -328,6 +363,35 @@ function DiscoverPage() {
       .select("need_id")
       .eq("user_id", uid);
     if (data) setBookmarkedIds(new Set((data as any[]).map((r: any) => r.need_id as string)));
+  };
+
+  const loadNearbyPreference = async (uid: string) => {
+    try {
+      const settings = await loadUserSettings(uid);
+      const privacy = (settings?.privacy_settings ?? {}) as { useLocationForMatching?: boolean };
+      if (!privacy.useLocationForMatching) {
+        setNearbyLocation(null);
+        return;
+      }
+      const { data } = await (supabase as any)
+        .from("profiles")
+        .select("country, city, region")
+        .eq("id", uid)
+        .limit(1);
+      const row = Array.isArray(data) ? data[0] : null;
+      if (!row?.city && !row?.country && !row?.region) {
+        setNearbyLocation(null);
+        return;
+      }
+      setNearbyLocation({
+        country: (row.country as string) ?? null,
+        city: (row.city as string) ?? null,
+        region: (row.region as string) ?? null,
+      });
+    } catch (error) {
+      console.warn("[discover] nearby preference unavailable:", error);
+      setNearbyLocation(null);
+    }
   };
 
   const toggleBookmark = async (needId: string) => {
@@ -373,14 +437,20 @@ function DiscoverPage() {
     const userIds = [...new Set((rows as any[]).map((r: any) => r.user_id as string))];
     const { data: profs } = await (supabase as any)
       .from("profiles")
-      .select("id, username, avatar_emoji")
+      .select("id, username, avatar_emoji, country, city, region")
       .in("id", userIds);
-    const profileMap = new Map<string, { username: string; emoji: string }>(
+    const profileMap = new Map<
+      string,
+      { username: string; emoji: string; country: string | null; city: string | null; region: string | null }
+    >(
       ((profs as any[]) ?? []).map((p: any) => [
         p.id as string,
         {
           username: (p.username as string) ?? t("home.userFallback"),
           emoji: (p.avatar_emoji as string) ?? "📝",
+          country: (p.country as string) ?? null,
+          city: (p.city as string) ?? null,
+          region: (p.region as string) ?? null,
         },
       ]),
     );
@@ -399,8 +469,9 @@ function DiscoverPage() {
         content: r.content as string,
         tags: tags.slice(0, 3),
         heat: idHash(r.id as string, 4, 1),
-        region: inferRegion(intent),
-        city: (intent?.region as string) ?? t("home.global"),
+        region: inferRegion(intent) || inferRegionFromLocation(owner?.country, owner?.region),
+        city: (intent?.region as string) ?? owner?.city ?? t("home.global"),
+        country: owner?.country ?? null,
       };
     });
     setDbNeeds(items);
@@ -445,6 +516,7 @@ function DiscoverPage() {
         return;
       }
       setUser(data.session.user);
+      void loadNearbyPreference(data.session.user.id);
       void loadDbNeeds();
       void loadBookmarkedIds(data.session.user.id);
     });
@@ -452,6 +524,7 @@ function DiscoverPage() {
       if (!s) navigate({ to: "/auth" });
       else {
         setUser(s.user);
+        void loadNearbyPreference(s.user.id);
         void loadDbNeeds();
         void loadBookmarkedIds(s.user.id);
       }
@@ -461,13 +534,15 @@ function DiscoverPage() {
   }, [navigate]);
 
   const filtered = useMemo(() => {
-    return dbNeeds.filter((n) => {
-      if (cityFilter && n.city !== cityFilter) return false;
-      if (filter !== "all" && n.region !== filter) return false;
-      if (query && !n.content.toLowerCase().includes(query.toLowerCase())) return false;
-      return true;
-    });
-  }, [filter, query, cityFilter]);
+    return dbNeeds
+      .filter((n) => {
+        if (cityFilter && n.city !== cityFilter) return false;
+        if (filter !== "all" && n.region !== filter) return false;
+        if (query && !n.content.toLowerCase().includes(query.toLowerCase())) return false;
+        return true;
+      })
+      .sort((a, b) => nearbyRank(b, nearbyLocation) - nearbyRank(a, nearbyLocation));
+  }, [filter, query, cityFilter, nearbyLocation]);
 
   const displayName =
     (user?.user_metadata as { display_name?: string } | undefined)?.display_name ||
@@ -498,7 +573,7 @@ function DiscoverPage() {
       return;
     }
     try {
-      await openOrCreateConversation(user.id, {
+      const conversationId = await openOrCreateConversation(user.id, {
         userId: n.userId,
         username: n.name,
         displayName: n.name,
@@ -506,7 +581,7 @@ function DiscoverPage() {
         matchTag: n.tags[0] || t("messages.matchingTag"),
       });
       toast.success(t("home.chatOpened", { name: n.name }));
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error(t("messages.sendFailed"), {
         description: error instanceof Error ? error.message : String(error),
@@ -612,6 +687,13 @@ function DiscoverPage() {
               <span className="hidden text-xs text-muted-foreground md:inline">
                 {t("discover.matchesFound", { n: filtered.length })}
               </span>
+              {nearbyLocation && (
+                <span className="hidden rounded-full border border-emerald-300/20 bg-emerald-300/10 px-2.5 py-1 text-[11px] text-emerald-200 md:inline">
+                  Nearby boosted: {[nearbyLocation.city, nearbyLocation.country]
+                    .filter(Boolean)
+                    .join(", ")}
+                </span>
+              )}
             </div>
 
             <div className="glass flex items-center gap-2 rounded-full px-3 py-1.5 text-xs text-muted-foreground">

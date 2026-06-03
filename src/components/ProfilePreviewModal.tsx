@@ -142,7 +142,7 @@ export function ProfilePreviewModal({ open, onClose }: Props) {
       return;
     }
     try {
-      await openOrCreateConversation(currentUser.id, {
+      const conversationId = await openOrCreateConversation(currentUser.id, {
         userId: data.userId,
         username: data.name,
         displayName: data.name,
@@ -150,7 +150,7 @@ export function ProfilePreviewModal({ open, onClose }: Props) {
       });
       toast.success(`已为你打开与 ${data.name} 的对话`);
       onClose();
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error("无法创建对话", {
         description: error instanceof Error ? error.message : String(error),

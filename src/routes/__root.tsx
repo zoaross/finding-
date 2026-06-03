@@ -1,6 +1,7 @@
 import { Outlet, Link, createRootRoute } from "@tanstack/react-router";
 import { Toaster } from "@/components/ui/sonner";
 import { I18nProvider } from "@/lib/i18n";
+import { ThemeProvider, useTheme } from "@/lib/theme";
 
 function NotFoundComponent() {
   return (
@@ -31,9 +32,20 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   return (
-    <I18nProvider>
+    <ThemeProvider>
+      <I18nProvider>
+        <RootShell />
+      </I18nProvider>
+    </ThemeProvider>
+  );
+}
+
+function RootShell() {
+  const { theme } = useTheme();
+  return (
+    <>
       <Outlet />
-      <Toaster theme="dark" position="bottom-right" />
-    </I18nProvider>
+      <Toaster theme={theme} position="bottom-right" />
+    </>
   );
 }

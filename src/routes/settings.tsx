@@ -21,6 +21,7 @@ import {
   MVP_LANGUAGE_CODES,
   MVP_LANGUAGE_LABELS,
   TRANSLATION_LANG_KEY,
+  type MvpLanguageCode,
   isMvpLanguageCode,
   sanitizeLanguageCode,
   useI18n,
@@ -28,6 +29,7 @@ import {
 } from "@/lib/i18n";
 import { useProfile, saveProfile, uploadAvatar } from "@/hooks/useProfile";
 import { loadUserSettings, saveUserSettings, unblockProfile } from "@/lib/socialActions";
+import { isAppTheme, useTheme } from "@/lib/theme";
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -52,6 +54,57 @@ const navItems = [
   { key: "nav.settings", icon: IconSettings, to: "/settings" as const, active: true },
 ];
 
+type ApproxLocation = {
+  country: string | null;
+  city: string | null;
+  region: string | null;
+  latitude_rounded: number;
+  longitude_rounded: number;
+  location_accuracy_meters: number | null;
+};
+
+function roundCoordinate(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+async function reverseGeocodeApproximate(latitude: number, longitude: number) {
+  try {
+    const response = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(
+        String(latitude),
+      )}&longitude=${encodeURIComponent(String(longitude))}&localityLanguage=en`,
+    );
+    if (!response.ok) return { country: null, city: null, region: null };
+    const data = (await response.json()) as {
+      countryName?: string;
+      city?: string;
+      locality?: string;
+      principalSubdivision?: string;
+    };
+    return {
+      country: data.countryName || null,
+      city: data.city || data.locality || null,
+      region: data.principalSubdivision || null,
+    };
+  } catch {
+    return { country: null, city: null, region: null };
+  }
+}
+
+function requestBrowserLocation(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      reject(new Error("Geolocation is not supported in this browser."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: false,
+      maximumAge: 10 * 60 * 1000,
+      timeout: 12000,
+    });
+  });
+}
+
 const sections = [
   { id: "account", labelKey: "settings.account", icon: "👤", descKey: "settings.accountDesc" },
   {
@@ -73,6 +126,12 @@ const sections = [
     descKey: "settings.section.prefLanguage.desc",
   },
   {
+    id: "appearance",
+    labelKey: "settings.appearance",
+    icon: "◐",
+    descKey: "settings.appearanceDesc",
+  },
+  {
     id: "notifications",
     labelKey: "settings.notifications",
     icon: "🔔",
@@ -89,7 +148,7 @@ const sections = [
 ];
 
 export const PREF_LANG_KEY = TRANSLATION_LANG_KEY;
-export const PREF_LANGS: Array<{ code: string; label: string }> = [
+export const PREF_LANGS: Array<{ code: MvpLanguageCode; label: string }> = [
   { code: "zh", label: MVP_LANGUAGE_LABELS.zh },
   { code: "en", label: MVP_LANGUAGE_LABELS.en },
   { code: "ko", label: MVP_LANGUAGE_LABELS.ko },
@@ -202,6 +261,7 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
 function SettingsPage() {
   const navigate = useNavigate();
   const { appLanguage, setAppLanguage, t } = useI18n();
+  const { theme, setTheme } = useTheme();
   const [user, setUser] = useState<User | null>(null);
   const [active, setActive] = useState("account");
   const [uiLangSearch, setUiLangSearch] = useState("");
@@ -212,12 +272,14 @@ function SettingsPage() {
   const [bio, setBio] = useState("");
   const [country, setCountry] = useState("");
   const [city, setCity] = useState("");
+  const [regionName, setRegionName] = useState("");
   const [originalForm, setOriginalForm] = useState({
     username: "",
     email: "",
     bio: "",
     country: "",
     city: "",
+    region: "",
   });
 
   // upload + modals
@@ -277,6 +339,9 @@ function SettingsPage() {
   const [translationLanguage, setTranslationLanguage] = useTranslationLanguage("zh");
   const [langSearch, setLangSearch] = useState("");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [locationBusy, setLocationBusy] = useState(false);
+  const [manualLocationMode, setManualLocationMode] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<string | null>(null);
   const [blockedUsers, setBlockedUsers] = useState<
     Array<{ id: string; profileId: string; username: string; avatar: string }>
   >([]);
@@ -317,6 +382,10 @@ function SettingsPage() {
         if (row?.privacy_settings && Object.keys(row.privacy_settings).length) {
           setPrivacy((current: typeof privacy) => ({ ...current, ...row.privacy_settings }));
         }
+        const appearance = (row?.appearance_settings ?? {}) as { theme?: unknown };
+        if (isAppTheme(appearance.theme)) {
+          setTheme(appearance.theme);
+        }
         const localAppCode = sanitizeLanguageCode(localStorage.getItem("finding:ui-lang"));
         const localTranslationCode = sanitizeLanguageCode(
           localStorage.getItem(TRANSLATION_LANG_KEY),
@@ -349,7 +418,7 @@ function SettingsPage() {
     return () => {
       cancelled = true;
     };
-  }, [setAppLanguage, setTranslationLanguage, user]);
+  }, [setAppLanguage, setTheme, setTranslationLanguage, user]);
 
   const loadBlockedUsers = async (uid: string) => {
     const { data, error } = await (supabase as any)
@@ -413,12 +482,16 @@ function SettingsPage() {
         translation_language: sanitizeLanguageCode(translationLanguage),
         notification_settings: notif,
         privacy_settings: privacy,
+        appearance_settings: { theme },
       }).catch((error) => {
         toast.error(t("settings.saveFailed"), { description: error.message });
       });
+      void saveProfile(user, { show_region: !!privacy.showRegion }).catch((error) => {
+        console.warn("[settings] show_region save failed:", error.message);
+      });
     }, 350);
     return () => window.clearTimeout(timer);
-  }, [appLanguage, notif, privacy, settingsLoaded, t, translationLanguage, user]);
+  }, [appLanguage, notif, privacy, settingsLoaded, t, theme, translationLanguage, user]);
 
   // Load profile from `profiles` table and hydrate form fields.
   const { profile, refresh: refreshProfile } = useProfile(user);
@@ -428,11 +501,17 @@ function SettingsPage() {
     const b = profile.bio ?? "";
     const c = profile.country ?? "";
     const cityValue = profile.city ?? "";
+    const regionValue = profile.region ?? "";
     setUsername(u);
     setBio(b);
     setCountry(c);
     setCity(cityValue);
-    setOriginalForm({ username: u, email, bio: b, country: c, city: cityValue });
+    setRegionName(regionValue);
+    setOriginalForm({ username: u, email, bio: b, country: c, city: cityValue, region: regionValue });
+    setPrivacy((current: typeof privacy) => ({
+      ...current,
+      showRegion: profile.show_region !== false,
+    }));
     if (profile.avatar_url) setAvatarPreview(profile.avatar_url);
   }, [email, profile]);
 
@@ -469,6 +548,16 @@ function SettingsPage() {
     }
   };
 
+  const handleThemeChange = (next: "dark" | "light") => {
+    setTheme(next);
+    if (user) {
+      void saveUserSettings(user.id, { appearance_settings: { theme: next } }).catch((error) => {
+        toast.error(t("settings.saveFailed"), { description: error.message });
+      });
+    }
+    toast.success(next === "light" ? t("settings.theme.light") : t("settings.theme.dark"));
+  };
+
   const handleAvatarPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
@@ -487,6 +576,7 @@ function SettingsPage() {
     setBio(originalForm.bio);
     setCountry(originalForm.country);
     setCity(originalForm.city);
+    setRegionName(originalForm.region);
     setPendingAvatarFile(null);
     setAvatarPreview(profile?.avatar_url ?? null);
     toast(t("settings.restored"));
@@ -536,6 +626,7 @@ function SettingsPage() {
           avatar_url: avatarUrl ?? undefined,
           country: country.trim() || null,
           city: city.trim() || null,
+          region: regionName.trim() || null,
         },
       })
       .catch(() => ({ data: { user: null } }));
@@ -549,7 +640,9 @@ function SettingsPage() {
       avatar_url: avatarUrl,
       country: country.trim() || null,
       city: city.trim() || null,
+      region: regionName.trim() || null,
       location,
+      show_region: !!privacy.showRegion,
     });
 
     setSaving(false);
@@ -557,10 +650,84 @@ function SettingsPage() {
       toast.error(t("settings.saveFailed"), { description: error.message });
       return;
     }
-    setOriginalForm({ username, email, bio, country, city });
+    setOriginalForm({ username, email, bio, country, city, region: regionName });
     setPendingAvatarFile(null);
     await refreshProfile();
     toast.success(t("settings.saveSuccess"));
+  };
+
+  const enableNearbyLocation = async () => {
+    if (!user) return;
+    setLocationBusy(true);
+    setLocationStatus(null);
+    setManualLocationMode(false);
+    try {
+      const position = await requestBrowserLocation();
+      const latitude_rounded = roundCoordinate(position.coords.latitude);
+      const longitude_rounded = roundCoordinate(position.coords.longitude);
+      const reverse = await reverseGeocodeApproximate(
+        position.coords.latitude,
+        position.coords.longitude,
+      );
+      const approximate: ApproxLocation = {
+        country: reverse.country || country.trim() || null,
+        city: reverse.city || city.trim() || null,
+        region: reverse.region || regionName.trim() || null,
+        latitude_rounded,
+        longitude_rounded,
+        location_accuracy_meters: Number.isFinite(position.coords.accuracy)
+          ? Math.round(position.coords.accuracy)
+          : null,
+      };
+      const displayLocation =
+        [approximate.city, approximate.country].filter(Boolean).join(", ") || null;
+      const { error } = await saveProfile(user, {
+        country: approximate.country,
+        city: approximate.city,
+        region: approximate.region,
+        latitude_rounded: approximate.latitude_rounded,
+        longitude_rounded: approximate.longitude_rounded,
+        location_accuracy_meters: approximate.location_accuracy_meters,
+        location: displayLocation,
+        show_region: !!privacy.showRegion,
+      });
+      if (error) throw new Error(error.message);
+
+      const nextPrivacy = { ...privacy, useLocationForMatching: true };
+      setPrivacy(nextPrivacy);
+      if (approximate.country) setCountry(approximate.country);
+      if (approximate.city) setCity(approximate.city);
+      if (approximate.region) setRegionName(approximate.region);
+      await saveUserSettings(user.id, { privacy_settings: nextPrivacy });
+      await refreshProfile();
+      setLocationStatus(
+        displayLocation
+          ? `Nearby matching enabled for ${displayLocation}. Exact coordinates are not public.`
+          : "Nearby matching enabled. Exact coordinates are not public.",
+      );
+      toast.success("Nearby matching enabled");
+    } catch (error) {
+      const nextPrivacy = { ...privacy, useLocationForMatching: false };
+      setPrivacy(nextPrivacy);
+      setManualLocationMode(true);
+      setLocationStatus("Location permission was denied or unavailable. Enter city manually.");
+      await saveUserSettings(user.id, { privacy_settings: nextPrivacy }).catch(() => undefined);
+      toast.error("Location was not enabled", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setLocationBusy(false);
+    }
+  };
+
+  const disableNearbyLocation = async () => {
+    if (!user) return;
+    const nextPrivacy = { ...privacy, useLocationForMatching: false };
+    setPrivacy(nextPrivacy);
+    await saveUserSettings(user.id, { privacy_settings: nextPrivacy }).catch((error) => {
+      toast.error(t("settings.saveFailed"), { description: error.message });
+    });
+    setLocationStatus("Nearby matching disabled.");
   };
 
   const handlePasswordChange = async () => {
@@ -772,7 +939,19 @@ function SettingsPage() {
                       />
                       <Field label={t("settings.country")} value={country} onChange={setCountry} />
                       <Field label={t("settings.city")} value={city} onChange={setCity} />
+                      <Field label="Region" value={regionName} onChange={setRegionName} />
                     </div>
+                    {manualLocationMode && (
+                      <div className="mt-3 rounded-xl border border-amber-300/20 bg-amber-300/10 px-4 py-3 text-xs text-amber-100">
+                        Location permission was denied. Use the country, city and region fields
+                        above for approximate nearby matching.
+                      </div>
+                    )}
+                    {locationStatus && (
+                      <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-xs text-muted-foreground">
+                        {locationStatus}
+                      </div>
+                    )}
 
                     <div className="mt-4">
                       <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -943,6 +1122,71 @@ function SettingsPage() {
                   </Card>
                 </section>
 
+                {/* Appearance */}
+                <section id="appearance" className="scroll-mt-8">
+                  <Card>
+                    <h2 className="mb-2 font-display text-xl font-bold">
+                      ◐ {t("settings.appearance")}
+                    </h2>
+                    <p className="mb-4 text-xs text-muted-foreground">
+                      {t("settings.appearanceDesc")}
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {(["dark", "light"] as const).map((mode) => {
+                        const activeMode = theme === mode;
+                        return (
+                          <button
+                            key={mode}
+                            onClick={() => handleThemeChange(mode)}
+                            className={`rounded-2xl border p-4 text-left transition ${
+                              activeMode
+                                ? "border-primary/50 bg-primary/10 text-foreground"
+                                : "border-[var(--border)] bg-[var(--surface-subtle)] text-muted-foreground hover:border-[var(--border-strong)] hover:text-foreground"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="font-medium">
+                                {mode === "dark"
+                                  ? t("settings.theme.dark")
+                                  : t("settings.theme.light")}
+                              </span>
+                              <span className="text-xs">{activeMode ? "✓" : ""}</span>
+                            </div>
+                            <div className="mt-3 flex gap-1.5">
+                              <span
+                                className={`h-8 flex-1 rounded-lg border border-[var(--border)] ${
+                                  mode === "dark"
+                                    ? "theme-preview-dark-surface"
+                                    : "theme-preview-light-surface"
+                                }`}
+                              />
+                              <span
+                                className={`h-8 flex-1 rounded-lg ${
+                                  mode === "dark"
+                                    ? "theme-preview-dark-primary"
+                                    : "theme-preview-light-primary"
+                                }`}
+                              />
+                              <span
+                                className={`h-8 flex-1 rounded-lg ${
+                                  mode === "dark"
+                                    ? "theme-preview-dark-muted"
+                                    : "theme-preview-light-muted"
+                                }`}
+                              />
+                            </div>
+                            <p className="mt-3 text-xs leading-relaxed">
+                              {mode === "dark"
+                                ? t("settings.theme.darkDesc")
+                                : t("settings.theme.lightDesc")}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Card>
+                </section>
+
                 {/* Language preference */}
                 <section id="language" className="scroll-mt-8">
                   <Card>
@@ -1043,6 +1287,19 @@ function SettingsPage() {
                     <p className="mb-3 text-xs text-muted-foreground">
                       {t("settings.privacyIntro")}
                     </p>
+                    <SettingRow
+                      title={
+                        locationBusy
+                          ? "Getting approximate location..."
+                          : "Use my location for nearby matching"
+                      }
+                      desc="Ask once for browser location and save only approximate city/region plus rounded coordinates."
+                      checked={!!privacy.useLocationForMatching}
+                      onChange={(enabled) => {
+                        if (enabled) void enableNearbyLocation();
+                        else void disableNearbyLocation();
+                      }}
+                    />
                     <SettingRow
                       title={`🛡️ ${t("settings.privacy.energy")}`}
                       desc={t("settings.privacy.energyDesc")}

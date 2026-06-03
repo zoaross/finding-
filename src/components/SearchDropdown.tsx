@@ -212,7 +212,7 @@ export function SearchDropdown({
       return;
     }
     try {
-      await openOrCreateConversation(currentUser.id, {
+      const conversationId = await openOrCreateConversation(currentUser.id, {
         userId: u.id,
         username: u.username,
         displayName: u.username,
@@ -220,7 +220,7 @@ export function SearchDropdown({
       });
       toast.success(`已为你打开与 ${u.username} 的对话`);
       setOpen(false);
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error("无法创建对话", {
         description: error instanceof Error ? error.message : String(error),
@@ -236,7 +236,7 @@ export function SearchDropdown({
       return;
     }
     try {
-      await openOrCreateConversation(currentUser.id, {
+      const conversationId = await openOrCreateConversation(currentUser.id, {
         userId: n.posterId,
         username: n.posterName,
         displayName: n.posterName,
@@ -245,7 +245,7 @@ export function SearchDropdown({
       });
       toast.success(`已联系 ${n.posterName},告诉 TA 你能帮忙`);
       setOpen(false);
-      navigate({ to: "/messages" });
+      navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
       toast.error("无法创建对话", {
         description: error instanceof Error ? error.message : String(error),
