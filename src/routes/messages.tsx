@@ -91,6 +91,14 @@ type MatchConversationRow = {
   status?: string | null;
 };
 
+type HydratedMatchRow = MatchConversationRow & {
+  otherId: string | null | undefined;
+  tag?: string | null;
+  updated?: string | null;
+  partnerName?: string | null;
+  needId?: string | null;
+};
+
 function relTime(iso: string) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;
   if (s < 60) return "刚刚";
@@ -269,9 +277,7 @@ function MessagesPage() {
     });
   };
 
-  const hydrateConversations = async (
-    rows: Array<MatchConversationRow & { otherId: string | null | undefined; tag?: string | null; updated?: string | null; partnerName?: string | null; needId?: string | null }>,
-  ): Promise<Conversation[]> => {
+  const hydrateConversations = async (rows: HydratedMatchRow[]): Promise<Conversation[]> => {
     const matchList = rows.filter((m) => m.otherId);
     if (!matchList.length) return [];
 
@@ -392,7 +398,7 @@ function MessagesPage() {
     }
 
     // Collect the other participant's ID
-    const matchList = [
+    const rawMatchList: HydratedMatchRow[] = [
       ...rows1.map((r: any) => ({
         ...r,
         id: r.id,
@@ -412,6 +418,23 @@ function MessagesPage() {
         needId: r.need_id,
       })),
     ].filter((m) => m.otherId);
+
+    const matchList = Array.from(
+      rawMatchList
+        .sort((a, b) => {
+          if (requestedMatchId) {
+            if (a.id === requestedMatchId) return -1;
+            if (b.id === requestedMatchId) return 1;
+          }
+          return new Date(b.updated ?? 0).getTime() - new Date(a.updated ?? 0).getTime();
+        })
+        .reduce((map, row) => {
+          const key = `${row.otherId}:${row.needId ?? "direct"}`;
+          if (!map.has(key)) map.set(key, row);
+          return map;
+        }, new Map<string, HydratedMatchRow>())
+        .values(),
+    );
 
     if (!matchList.length) {
       if (requestedMatchId) {

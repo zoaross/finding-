@@ -93,6 +93,16 @@ function formatTime(iso: string | null) {
   return new Date(iso).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
+function showSimulatedMatches() {
+  const envEnabled = import.meta.env.VITE_SHOW_SIMULATED_MATCHES === "true";
+  if (envEnabled) return true;
+  try {
+    return localStorage.getItem("finding:test-mode") === "true";
+  } catch {
+    return false;
+  }
+}
+
 function MatchesPage() {
   const navigate = useNavigate();
   const [matches, setMatches] = useState<RealMatch[]>([]);
@@ -185,6 +195,7 @@ function MatchesPage() {
           if (!profileId) return null;
           const profile = profiles.get(profileId);
           if (!profile) return null;
+          if (profile.is_simulated && !showSimulatedMatches()) return null;
           const cards = cardsByProfile.get(profileId) ?? [];
           const username = profile.username ?? row.partner_name ?? profile.id;
           const displayName = profile.display_name ?? profile.username ?? row.partner_name ?? "Finding user";
@@ -316,7 +327,7 @@ function MatchesPage() {
             </div>
             <h2 className="mt-4 font-display text-xl font-bold">还没有真实匹配结果</h2>
             <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-              当前没有从 Supabase matches 表读取到可显示的真实匹配。发布需求并生成匹配后，这里才会显示用户。
+              No real matches yet. AI will keep searching.
             </p>
             <button
               onClick={() => navigate({ to: "/home" })}

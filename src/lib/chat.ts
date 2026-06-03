@@ -91,6 +91,65 @@ function directConversationId(currentUserId: string, targetUserId: string, needI
   return needId ? `direct:${pair}:need:${needId}` : `direct:${pair}`;
 }
 
+async function findExistingConversation(
+  currentUserId: string,
+  targetUserId: string,
+  sourceNeedId?: string | null,
+): Promise<string | null> {
+  let ownedQuery = (supabase as any)
+    .from("matches")
+    .select("id, updated_at")
+    .eq("participant_one_id", currentUserId)
+    .or(`participant_two_profile_id.eq.${targetUserId},participant_two_id.eq.${targetUserId}`)
+    .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  let reverseQuery = (supabase as any)
+    .from("matches")
+    .select("id, updated_at")
+    .eq("participant_two_id", currentUserId)
+    .eq("participant_one_id", targetUserId)
+    .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+
+  if (sourceNeedId) {
+    ownedQuery = ownedQuery.eq("need_id", sourceNeedId);
+    reverseQuery = reverseQuery.eq("need_id", sourceNeedId);
+  } else {
+    ownedQuery = ownedQuery.is("need_id", null);
+    reverseQuery = reverseQuery.is("need_id", null);
+  }
+
+  const [owned, reverse] = await Promise.all([ownedQuery, reverseQuery]);
+  if ((owned as any).error) throw new Error((owned as any).error.message);
+  if ((reverse as any).error) throw new Error((reverse as any).error.message);
+
+  const candidates = [...(((owned as any).data ?? []) as any[]), ...(((reverse as any).data ?? []) as any[])];
+  candidates.sort(
+    (a, b) =>
+      new Date(b.updated_at ?? 0).getTime() - new Date(a.updated_at ?? 0).getTime(),
+  );
+  return candidates[0]?.id ?? null;
+}
+
+async function activateExistingConversation(
+  matchId: string,
+  currentUserId: string,
+  targetName: string,
+  matchTag?: string | null,
+): Promise<string> {
+  await (supabase as any)
+    .from("matches")
+    .update({ status: "active", updated_at: new Date().toISOString() })
+    .eq("id", matchId);
+  await ensureSystemWelcomeMessage(matchId, currentUserId, targetName, matchTag);
+  setRequestedMatch(matchId);
+  notifyConversationOpened(matchId);
+  return matchId;
+}
+
 async function currentAuthUserId() {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw new Error(error.message);
@@ -124,34 +183,6 @@ async function openOrCreateConversationForUser(
         : targetInput;
   const explicitMatchId =
     typeof targetInput !== "string" && isNewParams ? (targetInput as OpenConversationParams).matchId : null;
-
-  if (explicitMatchId) {
-    const { data: rows, error } = await (supabase as any)
-      .from("matches")
-      .select("id, participant_two_profile_id, partner_name, match_tag")
-      .eq("id", explicitMatchId)
-      .limit(1);
-    if (error) throw new Error(error.message);
-    const existing = ((rows as any[]) ?? [])[0];
-    if (existing?.id) {
-      await (supabase as any)
-        .from("matches")
-        .update({
-          status: "active",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", existing.id);
-      await ensureSystemWelcomeMessage(
-        existing.id as string,
-        currentUserId,
-        (target.displayName || existing.partner_name) as string,
-        target.matchTag || (existing.match_tag as string | null),
-      );
-      setRequestedMatch(existing.id as string);
-      notifyConversationOpened(existing.id as string);
-      return existing.id as string;
-    }
-  }
 
   let targetUserId = target.userId ?? null;
   let targetName = target.displayName || target.username || "Finding partner";
@@ -187,6 +218,29 @@ async function openOrCreateConversationForUser(
     throw new Error("Chat is blocked by privacy settings.");
   }
 
+  const reusableId = await findExistingConversation(currentUserId, targetUserId, target.needId);
+  if (reusableId) {
+    return activateExistingConversation(reusableId, currentUserId, targetName, target.matchTag);
+  }
+
+  if (explicitMatchId) {
+    const { data: rows, error } = await (supabase as any)
+      .from("matches")
+      .select("id, partner_name, match_tag")
+      .eq("id", explicitMatchId)
+      .limit(1);
+    if (error) throw new Error(error.message);
+    const existing = ((rows as any[]) ?? [])[0];
+    if (existing?.id) {
+      return activateExistingConversation(
+        existing.id as string,
+        currentUserId,
+        (target.displayName || existing.partner_name || targetName) as string,
+        target.matchTag || (existing.match_tag as string | null),
+      );
+    }
+  }
+
   const conversationId = directConversationId(currentUserId, targetUserId, target.needId);
   const { data: existing, error: readError } = await supabase
     .from("matches")
@@ -197,10 +251,6 @@ async function openOrCreateConversationForUser(
   if (readError) throw new Error(readError.message);
   const existingMatch = (existing ?? [])[0];
   if (existingMatch?.id) {
-    await (supabase as any)
-      .from("matches")
-      .update({ status: "active", updated_at: new Date().toISOString() })
-      .eq("id", existingMatch.id);
     if (target.needId) {
       await (supabase as any)
         .from("matches")
@@ -208,18 +258,17 @@ async function openOrCreateConversationForUser(
         .eq("id", existingMatch.id)
         .is("need_id", null);
     }
-    await ensureSystemWelcomeMessage(
-      existingMatch.id as string,
+    const existingId = existingMatch.id as string;
+    await activateExistingConversation(
+      existingId,
       currentUserId,
       targetName,
       target.matchTag,
     );
     if (targetIsSimulated && targetUserId) {
-      await ensureInitialSimulatedReply(existingMatch.id as string, targetUserId, targetName);
+      await ensureInitialSimulatedReply(existingId, targetUserId, targetName);
     }
-    setRequestedMatch(existingMatch.id as string);
-    notifyConversationOpened(existingMatch.id as string);
-    return existingMatch.id as string;
+    return existingId;
   }
 
   const { data, error } = await supabase
