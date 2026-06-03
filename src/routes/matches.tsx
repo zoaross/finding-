@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
@@ -16,7 +16,7 @@ import {
 import { StarField } from "@/components/StarField";
 import { FindingMark } from "@/components/icons/FindingIcons";
 import { ProfilePreviewModal, type ProfilePreviewData } from "@/components/ProfilePreviewModal";
-import { openOrCreateConversation } from "@/lib/chat";
+import { HIDDEN_CONVERSATION_STATUSES, openOrCreateConversation } from "@/lib/chat";
 import { setSavedUser } from "@/lib/socialActions";
 import { supabase } from "@/lib/supabase";
 
@@ -225,6 +225,31 @@ function MatchesPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [showExtra, setShowExtra] = useState(false);
   const [saved, setSaved] = useState<Record<string, boolean>>({});
+  const [hiddenProfileIds, setHiddenProfileIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    void supabase.auth.getSession().then(async ({ data }) => {
+      const uid = data.session?.user.id;
+      if (!uid) return;
+      const { data: rows } = await (supabase as any)
+        .from("matches")
+        .select("participant_two_id, participant_two_profile_id")
+        .eq("participant_one_id", uid)
+        .in("status", HIDDEN_CONVERSATION_STATUSES);
+      if (cancelled) return;
+      setHiddenProfileIds(
+        new Set(
+          ((rows as any[]) ?? [])
+            .flatMap((r: any) => [r.participant_two_profile_id, r.participant_two_id])
+            .filter(Boolean) as string[],
+        ),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const startChat = async (match: Match) => {
     const { data } = await supabase.auth.getSession();
     const currentUser = data.session?.user;
@@ -233,10 +258,10 @@ function MatchesPage() {
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(currentUser.id, {
-        userId: match.profileId,
-        username: match.username,
-        displayName: match.username,
+      const conversationId = await openOrCreateConversation({
+        partnerId: match.profileId,
+        partnerUsername: match.username,
+        partnerName: match.username,
         matchTag: match.title,
       });
       toast.success(`已为你打开与 ${match.name} 的对话`);
@@ -267,7 +292,9 @@ function MatchesPage() {
     }
   };
 
-  const list = showExtra ? [...MATCHES, ...EXTRA] : MATCHES;
+  const list = (showExtra ? [...MATCHES, ...EXTRA] : MATCHES).filter(
+    (match) => !hiddenProfileIds.has(match.profileId),
+  );
   const opened = list.find((m) => m.id === openId) || null;
 
   const PORTFOLIO_ICONS: LucideIcon[] = [

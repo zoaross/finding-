@@ -6,7 +6,7 @@ import { toast } from "sonner";
 
 import type { User } from "@supabase/supabase-js";
 import { StarField } from "@/components/StarField";
-import { openOrCreateConversation } from "@/lib/chat";
+import { HIDDEN_CONVERSATION_STATUSES, openOrCreateConversation } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
 import { setSavedNeed } from "@/lib/socialActions";
 import { parseNeedIntent } from "@/lib/claude";
@@ -174,11 +174,11 @@ function HomePage() {
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(user.id, {
-        userId: target?.userId,
-        username: name,
-        displayName: name,
-        needId: target?.needId,
+      const conversationId = await openOrCreateConversation({
+        partnerId: target?.userId,
+        partnerUsername: name,
+        partnerName: name,
+        sourceNeedId: target?.needId,
         matchTag: target?.matchTag,
       });
       toast.success(t("home.chatOpened", { name }));
@@ -298,15 +298,20 @@ function HomePage() {
           .gte("created_at", todayStart.toISOString())
           .eq("is_archived", false),
         (supabase as any).from("profiles").select("id", { count: "exact", head: true }),
-        (supabase as any).from("matches").select("id", { count: "exact", head: true }),
         (supabase as any)
           .from("matches")
           .select("id", { count: "exact", head: true })
-          .eq("participant_one_id", uid),
+          .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`),
         (supabase as any)
           .from("matches")
           .select("id", { count: "exact", head: true })
-          .eq("participant_two_id", uid),
+          .eq("participant_one_id", uid)
+          .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`),
+        (supabase as any)
+          .from("matches")
+          .select("id", { count: "exact", head: true })
+          .eq("participant_two_id", uid)
+          .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`),
       ] as Promise<{ count: number | null }>[]);
 
       const todayN = (todayR as any).count ?? 0;
@@ -397,10 +402,22 @@ function HomePage() {
           .from("blocked_users")
           .select("blocked_profile_id")
           .eq("blocker_id", uid);
+        const { data: hiddenMatchRows } = await (supabase as any)
+          .from("matches")
+          .select("participant_two_id, participant_two_profile_id")
+          .eq("participant_one_id", uid)
+          .in("status", HIDDEN_CONVERSATION_STATUSES);
         const blockedIds = new Set(
           ((blockedRows as any[]) ?? []).map((r: any) => r.blocked_profile_id as string),
         );
-        const profs = (otherProfiles as any[]).filter((p: any) => !blockedIds.has(p.id as string));
+        const hiddenPartnerIds = new Set(
+          ((hiddenMatchRows as any[]) ?? [])
+            .flatMap((r: any) => [r.participant_two_profile_id, r.participant_two_id])
+            .filter(Boolean) as string[],
+        );
+        const profs = (otherProfiles as any[]).filter(
+          (p: any) => !blockedIds.has(p.id as string) && !hiddenPartnerIds.has(p.id as string),
+        );
         const toRecUser = (p: any): RecUser => ({
           id: p.id as string,
           name: (p.username as string) ?? t("home.userFallback"),

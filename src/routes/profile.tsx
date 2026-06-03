@@ -527,10 +527,10 @@ export function ProfilePageInner({
     }
     if (!viewing?.name) return;
     try {
-      const conversationId = await openOrCreateConversation(user.id, {
-        userId: viewing.userId,
-        username: viewing.name,
-        displayName: viewing.name,
+      const conversationId = await openOrCreateConversation({
+        partnerId: viewing.userId,
+        partnerUsername: viewing.name,
+        partnerName: viewing.name,
         matchTag: viewing.role,
       });
       navigate({ to: "/messages", search: { conversationId } });

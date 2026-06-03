@@ -142,10 +142,10 @@ export function ProfilePreviewModal({ open, onClose }: Props) {
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(currentUser.id, {
-        userId: data.userId,
-        username: data.name,
-        displayName: data.name,
+      const conversationId = await openOrCreateConversation({
+        partnerId: data.userId,
+        partnerUsername: data.name,
+        partnerName: data.name,
         matchTag: data.role,
       });
       toast.success(`已为你打开与 ${data.name} 的对话`);

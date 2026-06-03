@@ -55,10 +55,10 @@ function RecommendationsPage() {
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(currentUser.id, {
-        userId: person.id,
-        username: person.username,
-        displayName: person.username,
+      const conversationId = await openOrCreateConversation({
+        partnerId: person.id,
+        partnerUsername: person.username,
+        partnerName: person.username,
         matchTag: person.title,
       });
       toast.success(`已为你打开与 ${person.name} 的对话`);

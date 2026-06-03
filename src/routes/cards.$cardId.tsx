@@ -191,10 +191,10 @@ function CardDetailPage() {
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(user.id, {
-        userId: card.owner.id,
-        username: card.owner.username,
-        displayName: card.owner.display_name ?? card.owner.username,
+      const conversationId = await openOrCreateConversation({
+        partnerId: card.owner.id,
+        partnerUsername: card.owner.username,
+        partnerName: card.owner.display_name ?? card.owner.username,
         matchTag: card.title,
       });
       navigate({ to: "/messages", search: { conversationId } });

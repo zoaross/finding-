@@ -17,6 +17,16 @@ export type ConversationTarget = {
   matchTag?: string | null;
 };
 
+export type OpenConversationParams = {
+  partnerId?: string | null;
+  partnerUsername?: string | null;
+  partnerName?: string | null;
+  sourceNeedId?: string | null;
+  matchId?: string | null;
+  matchTag?: string | null;
+};
+
+export const HIDDEN_CONVERSATION_STATUSES = ["rejected", "closed", "dismissed", "completed"];
 const ACTIVE_MATCH_KEY = "finding:active-match-id";
 export const CONVERSATION_OPENED_EVENT = "finding:conversation-opened";
 export const SYSTEM_MESSAGE_PREFIX = "__finding_system__:";
@@ -81,12 +91,68 @@ function directConversationId(currentUserId: string, targetUserId: string, needI
   return needId ? `direct:${pair}:need:${needId}` : `direct:${pair}`;
 }
 
-export async function openOrCreateConversation(
+async function currentAuthUserId() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw new Error(error.message);
+  const userId = data.session?.user.id;
+  if (!userId) throw new Error("Please sign in first.");
+  return userId;
+}
+
+async function openOrCreateConversationForUser(
   currentUserId: string,
-  targetInput: string | ConversationTarget,
+  targetInput: string | ConversationTarget | OpenConversationParams,
 ): Promise<string> {
+  const isNewParams =
+    typeof targetInput !== "string" &&
+    ("partnerId" in targetInput ||
+      "partnerUsername" in targetInput ||
+      "partnerName" in targetInput ||
+      "sourceNeedId" in targetInput ||
+      "matchId" in targetInput);
   const target: ConversationTarget =
-    typeof targetInput === "string" ? { userId: targetInput } : targetInput;
+    typeof targetInput === "string"
+      ? { userId: targetInput }
+      : isNewParams
+        ? {
+            userId: (targetInput as OpenConversationParams).partnerId,
+            username: (targetInput as OpenConversationParams).partnerUsername,
+            displayName: (targetInput as OpenConversationParams).partnerName,
+            needId: (targetInput as OpenConversationParams).sourceNeedId,
+            matchTag: (targetInput as OpenConversationParams).matchTag,
+          }
+        : targetInput;
+  const explicitMatchId =
+    typeof targetInput !== "string" && isNewParams ? (targetInput as OpenConversationParams).matchId : null;
+
+  if (explicitMatchId) {
+    const { data: rows, error } = await (supabase as any)
+      .from("matches")
+      .select("id, participant_two_profile_id, partner_name, match_tag")
+      .eq("id", explicitMatchId)
+      .limit(1);
+    if (error) throw new Error(error.message);
+    const existing = ((rows as any[]) ?? [])[0];
+    if (existing?.id) {
+      await (supabase as any)
+        .from("matches")
+        .update({
+          status: "active",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existing.id);
+      await ensureSystemWelcomeMessage(
+        existing.id as string,
+        currentUserId,
+        (target.displayName || existing.partner_name) as string,
+        target.matchTag || (existing.match_tag as string | null),
+      );
+      setRequestedMatch(existing.id as string);
+      notifyConversationOpened(existing.id as string);
+      return existing.id as string;
+    }
+  }
+
   let targetUserId = target.userId ?? null;
   let targetName = target.displayName || target.username || "Finding partner";
   let targetIsSimulated = false;
@@ -133,7 +199,7 @@ export async function openOrCreateConversation(
   if (existingMatch?.id) {
     await (supabase as any)
       .from("matches")
-      .update({ updated_at: new Date().toISOString() })
+      .update({ status: "active", updated_at: new Date().toISOString() })
       .eq("id", existingMatch.id);
     if (target.needId) {
       await (supabase as any)
@@ -190,7 +256,49 @@ export async function openOrCreateConversation(
   return data.id as string;
 }
 
+export async function openOrCreateConversation(
+  params: OpenConversationParams,
+): Promise<string>;
+export async function openOrCreateConversation(
+  currentUserId: string,
+  targetInput: string | ConversationTarget,
+): Promise<string>;
+export async function openOrCreateConversation(
+  currentUserIdOrParams: string | OpenConversationParams,
+  targetInput?: string | ConversationTarget,
+): Promise<string> {
+  if (typeof currentUserIdOrParams === "string") {
+    if (!targetInput) throw new Error("Missing conversation target.");
+    return openOrCreateConversationForUser(currentUserIdOrParams, targetInput);
+  }
+  return openOrCreateConversationForUser(await currentAuthUserId(), currentUserIdOrParams);
+}
+
 export const startConversation = openOrCreateConversation;
+
+export async function rejectConversation(
+  matchId: string,
+  currentUserId: string,
+  reason = "not_a_match",
+): Promise<void> {
+  const payload = {
+    status: "rejected",
+    rejection_reason: reason,
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await (supabase as any).from("matches").update(payload).eq("id", matchId);
+  if (!error) {
+    window.dispatchEvent(new CustomEvent("finding:conversation-rejected", { detail: { matchId } }));
+    return;
+  }
+  if (!error.message.includes("rejection_reason")) throw new Error(error.message);
+  const { error: fallbackError } = await (supabase as any)
+    .from("matches")
+    .update({ status: "rejected", updated_at: payload.updated_at })
+    .eq("id", matchId);
+  if (fallbackError) throw new Error(fallbackError.message);
+  window.dispatchEvent(new CustomEvent("finding:conversation-rejected", { detail: { matchId } }));
+}
 
 export async function ensureConversation(
   matchId: string,

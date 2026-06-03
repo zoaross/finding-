@@ -4,7 +4,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 import { StarField } from "@/components/StarField";
-import { openOrCreateConversation } from "@/lib/chat";
+import { HIDDEN_CONVERSATION_STATUSES, openOrCreateConversation } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
 import { loadUserSettings, setSavedNeed } from "@/lib/socialActions";
 import { useI18n } from "@/lib/i18n";
@@ -426,7 +426,7 @@ function DiscoverPage() {
     }
   };
 
-  const loadDbNeeds = async () => {
+  const loadDbNeeds = async (uid?: string) => {
     const { data: rows } = await (supabase as any)
       .from("needs")
       .select("id, content, created_at, user_id, parsed_intent")
@@ -434,6 +434,19 @@ function DiscoverPage() {
       .order("created_at", { ascending: false })
       .limit(60);
     if (!rows?.length) return;
+    let hiddenPartnerIds = new Set<string>();
+    if (uid) {
+      const { data: hiddenRows } = await (supabase as any)
+        .from("matches")
+        .select("participant_two_id, participant_two_profile_id")
+        .eq("participant_one_id", uid)
+        .in("status", HIDDEN_CONVERSATION_STATUSES);
+      hiddenPartnerIds = new Set(
+        ((hiddenRows as any[]) ?? [])
+          .flatMap((r: any) => [r.participant_two_profile_id, r.participant_two_id])
+          .filter(Boolean) as string[],
+      );
+    }
     const userIds = [...new Set((rows as any[]).map((r: any) => r.user_id as string))];
     const { data: profs } = await (supabase as any)
       .from("profiles")
@@ -454,7 +467,8 @@ function DiscoverPage() {
         },
       ]),
     );
-    const items: NeedItem[] = (rows as any[]).map((r: any) => {
+    const visibleRows = (rows as any[]).filter((r: any) => !hiddenPartnerIds.has(r.user_id as string));
+    const items: NeedItem[] = visibleRows.map((r: any) => {
       const intent = r.parsed_intent as Record<string, unknown> | null;
       const tags = Array.isArray(intent?.tags) ? (intent!.tags as string[]) : [];
       const owner = profileMap.get(r.user_id as string);
@@ -517,7 +531,7 @@ function DiscoverPage() {
       }
       setUser(data.session.user);
       void loadNearbyPreference(data.session.user.id);
-      void loadDbNeeds();
+      void loadDbNeeds(data.session.user.id);
       void loadBookmarkedIds(data.session.user.id);
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
@@ -525,7 +539,7 @@ function DiscoverPage() {
       else {
         setUser(s.user);
         void loadNearbyPreference(s.user.id);
-        void loadDbNeeds();
+        void loadDbNeeds(s.user.id);
         void loadBookmarkedIds(s.user.id);
       }
     });
@@ -573,11 +587,11 @@ function DiscoverPage() {
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(user.id, {
-        userId: n.userId,
-        username: n.name,
-        displayName: n.name,
-        needId: n.id,
+      const conversationId = await openOrCreateConversation({
+        partnerId: n.userId,
+        partnerUsername: n.name,
+        partnerName: n.name,
+        sourceNeedId: n.id,
         matchTag: n.tags[0] || t("messages.matchingTag"),
       });
       toast.success(t("home.chatOpened", { name: n.name }));

@@ -368,12 +368,12 @@ function BookmarksPage() {
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(user.id, {
-        userId: need.userId,
-        username: need.name,
-        displayName: need.name,
+      const conversationId = await openOrCreateConversation({
+        partnerId: need.userId,
+        partnerUsername: need.name,
+        partnerName: need.name,
         matchTag: need.content,
-        needId: need.id,
+        sourceNeedId: need.id,
       });
       navigate({ to: "/messages", search: { conversationId } });
     } catch (error) {
@@ -386,10 +386,10 @@ function BookmarksPage() {
   const openSavedUserChat = async (savedUser: SavedUser) => {
     if (!user) return;
     try {
-      const conversationId = await openOrCreateConversation(user.id, {
-        userId: savedUser.id,
-        username: savedUser.name,
-        displayName: savedUser.name,
+      const conversationId = await openOrCreateConversation({
+        partnerId: savedUser.id,
+        partnerUsername: savedUser.name,
+        partnerName: savedUser.name,
         matchTag: savedUser.identities[0],
       });
       navigate({ to: "/messages", search: { conversationId } });

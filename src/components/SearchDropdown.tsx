@@ -212,10 +212,10 @@ export function SearchDropdown({
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(currentUser.id, {
-        userId: u.id,
-        username: u.username,
-        displayName: u.username,
+      const conversationId = await openOrCreateConversation({
+        partnerId: u.id,
+        partnerUsername: u.username,
+        partnerName: u.username,
         matchTag: u.tags[0] || "Profile match",
       });
       toast.success(`已为你打开与 ${u.username} 的对话`);
@@ -236,11 +236,11 @@ export function SearchDropdown({
       return;
     }
     try {
-      const conversationId = await openOrCreateConversation(currentUser.id, {
-        userId: n.posterId,
-        username: n.posterName,
-        displayName: n.posterName,
-        needId: n.id.startsWith("mock:") ? null : n.id,
+      const conversationId = await openOrCreateConversation({
+        partnerId: n.posterId,
+        partnerUsername: n.posterName,
+        partnerName: n.posterName,
+        sourceNeedId: n.id.startsWith("mock:") ? null : n.id,
         matchTag: n.tags[0] || "Need match",
       });
       toast.success(`已联系 ${n.posterName},告诉 TA 你能帮忙`);

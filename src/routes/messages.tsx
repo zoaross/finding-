@@ -12,7 +12,9 @@ import {
   subscribeMessages,
   consumeRequestedMatch,
   CONVERSATION_OPENED_EVENT,
+  HIDDEN_CONVERSATION_STATUSES,
   SYSTEM_MESSAGE_PREFIX,
+  rejectConversation,
   type DBMessage,
 } from "@/lib/chat";
 import {
@@ -368,15 +370,17 @@ function MessagesPage() {
       (supabase as any)
         .from("matches")
         .select(
-          "id, need_id, participant_two_id, participant_two_profile_id, match_tag, updated_at, partner_name",
+          "id, need_id, participant_two_id, participant_two_profile_id, match_tag, updated_at, partner_name, status",
         )
         .eq("participant_one_id", uid)
+        .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`)
         .order("updated_at", { ascending: false })
         .limit(100),
       (supabase as any)
         .from("matches")
-        .select("id, need_id, participant_one_id, match_tag, updated_at, partner_name")
+        .select("id, need_id, participant_one_id, match_tag, updated_at, partner_name, status")
         .eq("participant_two_id", uid)
+        .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`)
         .order("updated_at", { ascending: false })
         .limit(100),
     ]);
@@ -841,22 +845,29 @@ function MessagesPage() {
     if (!active) return;
     setConfirmAction("mismatch");
   };
-  const confirmMismatch = () => {
-    if (!active) return;
+  const confirmMismatch = async () => {
+    if (!active || !user) return;
     setConfirmAction(null);
-    if (active.needId && user) {
-      void (supabase as any)
-        .from("needs")
-        .update({ status: "failed", is_archived: true, updated_at: new Date().toISOString() })
-        .eq("id", active.needId)
-        .eq("user_id", user.id);
+    try {
+      await rejectConversation(active.id, user.id, "not_a_match");
+      if (active.needId) {
+        await (supabase as any)
+          .from("needs")
+          .update({ status: "failed", is_archived: true, updated_at: new Date().toISOString() })
+          .eq("id", active.needId)
+          .eq("user_id", user.id);
+      }
+    } catch (error) {
+      toast.error(t("messages.sendFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      return;
     }
     setConvs((prev) => {
       const next = prev.filter((c) => c.id !== activeConversationId);
       setActiveConversationId(next[0]?.id ?? "");
       return next;
     });
-    // Push to needs page queue → moves a need to "未完成"
     try {
       const q = JSON.parse(localStorage.getItem("finding:pending-need-status") || "[]");
       q.push("failed");
