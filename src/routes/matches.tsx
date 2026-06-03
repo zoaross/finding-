@@ -232,6 +232,13 @@ function MatchesPage() {
     };
   }, [navigate]);
 
+  useEffect(() => {
+    const matchIdFromHash = window.location.hash.replace(/^#/, "");
+    if (matchIdFromHash && matches.some((match) => match.id === matchIdFromHash)) {
+      setOpenId(matchIdFromHash);
+    }
+  }, [matches]);
+
   const opened = useMemo(() => matches.find((match) => match.id === openId) ?? null, [matches, openId]);
 
   const startChat = async (match: RealMatch) => {

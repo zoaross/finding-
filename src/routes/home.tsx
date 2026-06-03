@@ -291,7 +291,7 @@ function HomePage() {
 
     try {
       // ── Counts ──
-      const [todayR, profilesR, matchR, c1R, c2R] = await Promise.all([
+      const [todayR, profilesR, matchRowsR, c1R, c2R] = await Promise.all([
         (supabase as any)
           .from("needs")
           .select("id", { count: "exact", head: true })
@@ -300,7 +300,7 @@ function HomePage() {
         (supabase as any).from("profiles").select("id", { count: "exact", head: true }),
         (supabase as any)
           .from("matches")
-          .select("id", { count: "exact", head: true })
+          .select("participant_two_id, participant_two_profile_id")
           .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`),
         (supabase as any)
           .from("matches")
@@ -316,7 +316,29 @@ function HomePage() {
 
       const todayN = (todayR as any).count ?? 0;
       const profTotal = (profilesR as any).count ?? 0;
-      const matchTotal = (matchR as any).count ?? 0;
+      const matchRows = ((matchRowsR as any).data ?? []) as Array<{
+        participant_two_id?: string | null;
+        participant_two_profile_id?: string | null;
+      }>;
+      const matchProfileIds = [
+        ...new Set(
+          matchRows
+            .map((row) => row.participant_two_profile_id ?? row.participant_two_id)
+            .filter(Boolean) as string[],
+        ),
+      ];
+      const { data: matchProfiles } = matchProfileIds.length
+        ? await (supabase as any).from("profiles").select("id, is_simulated").in("id", matchProfileIds)
+        : { data: [] };
+      const simulatedMatchProfileIds = new Set(
+        ((matchProfiles as any[]) ?? [])
+          .filter((profile) => profile.is_simulated)
+          .map((profile) => profile.id as string),
+      );
+      const matchTotal = matchRows.filter((row) => {
+        const profileId = row.participant_two_profile_id ?? row.participant_two_id;
+        return profileId && !simulatedMatchProfileIds.has(profileId);
+      }).length;
       const c1 = (c1R as any).count ?? 0;
       const c2 = (c2R as any).count ?? 0;
 

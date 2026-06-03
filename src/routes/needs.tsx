@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 import { StarField } from "@/components/StarField";
+import { HIDDEN_CONVERSATION_STATUSES, openOrCreateConversation } from "@/lib/chat";
 import { saveNeedCloseFeedback, type NeedCloseReason } from "@/lib/socialActions";
 import { supabase } from "@/lib/supabase";
 import { useI18n } from "@/lib/i18n";
@@ -48,6 +49,26 @@ type NeedRow = {
   status: string | null;
   is_archived: boolean;
   created_at: string;
+};
+
+type NeedMatch = {
+  id: string;
+  needId: string;
+  partnerId: string;
+  username: string;
+  displayName: string;
+  avatar: string;
+  headline: string;
+  location: string;
+  score: number;
+  cardId: string | null;
+  cardTitle: string | null;
+  dataSource: "real_supabase";
+};
+
+type MatchCountInfo = {
+  real: number;
+  seedFiltered: number;
 };
 
 const navItems = [
@@ -208,6 +229,7 @@ function NeedsPage() {
   const [closingNeed, setClosingNeed] = useState<NeedRow | null>(null);
   const [closeReason, setCloseReason] = useState<NeedCloseReason>("found_someone");
   const [closeFeedback, setCloseFeedback] = useState("");
+  const [matchCounts, setMatchCounts] = useState<Record<string, MatchCountInfo>>({});
 
   const setStatus = (id: string, s: LocalStatus) => {
     setOverrides((prev) => {
@@ -338,7 +360,9 @@ function NeedsPage() {
         .order("created_at", { ascending: false });
       if (!mounted) return;
       if (err) setError(explainNeedError(err.message));
-      setNeeds((rows as NeedRow[]) ?? []);
+      const loadedNeeds = (rows as NeedRow[]) ?? [];
+      setNeeds(loadedNeeds);
+      void loadNeedMatchCounts(loadedNeeds.map((need) => need.id));
     });
     const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
       if (!session) navigate({ to: "/auth" });
@@ -544,6 +568,7 @@ function NeedsPage() {
                     key={n.id}
                     need={n}
                     status={effectiveStatus(n, overrides)}
+                    matchCount={matchCounts[n.id]?.real ?? 0}
                     onOpen={() => setSelectedId(n.id)}
                   />
                 ))}
@@ -575,20 +600,68 @@ function NeedsPage() {
       />
     </div>
   );
+
+  async function loadNeedMatchCounts(needIds: string[]) {
+    if (!needIds.length) {
+      setMatchCounts({});
+      return;
+    }
+    const hiddenFilter = `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`;
+    const { data: rows, error: matchError } = await (supabase as any)
+      .from("matches")
+      .select("need_id, participant_two_id, participant_two_profile_id, status")
+      .in("need_id", needIds)
+      .not("status", "in", hiddenFilter);
+    if (matchError) {
+      console.warn("[needs] match counts failed:", matchError.message);
+      return;
+    }
+    const profileIds = [
+      ...new Set(
+        ((rows ?? []) as any[])
+          .map((row) => row.participant_two_profile_id ?? row.participant_two_id)
+          .filter(Boolean) as string[],
+      ),
+    ];
+    const { data: profiles, error: profileError } = profileIds.length
+      ? await (supabase as any).from("profiles").select("id, is_simulated").in("id", profileIds)
+      : { data: [], error: null };
+    if (profileError) {
+      console.warn("[needs] match count profiles failed:", profileError.message);
+      return;
+    }
+    const simulated = new Set(
+      ((profiles ?? []) as any[])
+        .filter((profile) => profile.is_simulated)
+        .map((profile) => profile.id as string),
+    );
+    const next: Record<string, MatchCountInfo> = {};
+    for (const id of needIds) next[id] = { real: 0, seedFiltered: 0 };
+    for (const row of (rows ?? []) as any[]) {
+      const needId = row.need_id as string | null;
+      const profileId = (row.participant_two_profile_id ?? row.participant_two_id) as string | null;
+      if (!needId || !profileId) continue;
+      if (!next[needId]) next[needId] = { real: 0, seedFiltered: 0 };
+      if (simulated.has(profileId)) next[needId].seedFiltered += 1;
+      else next[needId].real += 1;
+    }
+    setMatchCounts(next);
+  }
 }
 
 function NeedCard({
   need,
   status,
+  matchCount,
   onOpen,
 }: {
   need: NeedRow;
   status: LocalStatus;
+  matchCount: number;
   onOpen: () => void;
 }) {
   const { t } = useI18n();
   const meta = statusMeta(status);
-  const matchCount = mockMatchCount(need.id);
 
   const toneClass =
     meta.tone === "live"
@@ -745,10 +818,6 @@ function EmptyState({ hasAny, filter }: { hasAny: boolean; filter: FilterKey }) 
 
 // ---------- Helpers & Detail Modal ----------
 
-function mockMatchCount(id: string) {
-  return Math.abs(Array.from(id).reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 0)) % 48;
-}
-
 function CloseNeedModal({
   need,
   reason,
@@ -844,54 +913,6 @@ function CloseNeedModal({
   );
 }
 
-const MATCH_NAMES = [
-  {
-    userId: "10000000-0000-0000-0000-000000000001",
-    name: "hana_seoul",
-    initial: "H",
-    grad: "from-fuchsia-500 to-purple-600",
-  },
-  {
-    userId: "10000000-0000-0000-0000-000000000002",
-    name: "minjun_backend",
-    initial: "M",
-    grad: "from-cyan-500 to-blue-600",
-  },
-  {
-    userId: "10000000-0000-0000-0000-000000000004",
-    name: "yui_designs",
-    initial: "Y",
-    grad: "from-rose-500 to-orange-500",
-  },
-  {
-    userId: "10000000-0000-0000-0000-000000000008",
-    name: "mei_exchange",
-    initial: "M",
-    grad: "from-emerald-500 to-teal-600",
-  },
-  {
-    userId: "10000000-0000-0000-0000-000000000040",
-    name: "tae_frontend",
-    initial: "T",
-    grad: "from-violet-500 to-indigo-600",
-  },
-];
-
-function pickFromSeed<T>(arr: T[], seed: number, n: number): T[] {
-  const out: T[] = [];
-  let s = seed;
-  const used = new Set<number>();
-  while (out.length < n && used.size < arr.length) {
-    s = (s * 9301 + 49297) % 233280;
-    const idx = s % arr.length;
-    if (!used.has(idx)) {
-      used.add(idx);
-      out.push(arr[idx]);
-    }
-  }
-  return out;
-}
-
 function NeedDetailModal({
   need,
   status,
@@ -912,36 +933,21 @@ function NeedDetailModal({
   onSaveRating: (entry: RatingEntry) => void;
 }) {
   const navigate = useNavigate();
-  const openMatchedProfile = (m: (typeof MATCH_NAMES)[number]) => {
-    navigate({ to: "/user/$username", params: { username: m.name } });
-  };
-  const seed = useMemo(
-    () => (need ? Array.from(need.id).reduce((a, c) => a + c.charCodeAt(0), 0) : 0),
-    [need],
-  );
+  const [realMatches, setRealMatches] = useState<NeedMatch[]>([]);
+  const [seedFilteredCount, setSeedFilteredCount] = useState(0);
+  const [matchesLoading, setMatchesLoading] = useState(false);
+  const [matchesError, setMatchesError] = useState<string | null>(null);
   const tags = useMemo(() => (need ? deriveTags(need.content) : []), [need]);
-  const matched = useMemo(
-    () =>
-      need
-        ? pickFromSeed(MATCH_NAMES, seed + 7, 3).map((m, i) => ({
-            ...m,
-            score: 96 - i * 3 - (seed % 5),
-          }))
-        : [],
-    [need, seed],
-  );
 
-  // Collaboration duration in days (deterministic per need)
   const collabDays = useMemo(() => {
     if (!need) return 0;
     if (status === "archived") {
       const created = +new Date(need.created_at);
       const days = Math.max(1, Math.round((Date.now() - created) / 86400000));
-      // Cap to a friendly range; fallback to seed-based 7-30 if days is huge
-      return days > 90 ? 7 + (seed % 24) : days;
+      return days > 90 ? 90 : days;
     }
     return 0;
-  }, [need, status, seed]);
+  }, [need, status]);
 
   const [stars, setStars] = useState<number>(rating?.rating ?? 0);
   const [hover, setHover] = useState(0);
@@ -951,12 +957,244 @@ function NeedDetailModal({
     setNote(rating?.note ?? "");
   }, [rating, need?.id]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function loadRealMatches() {
+      if (!need) {
+        setRealMatches([]);
+        setSeedFilteredCount(0);
+        return;
+      }
+      setMatchesLoading(true);
+      setMatchesError(null);
+      const hiddenFilter = `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`;
+      const { data: matchRows, error: matchError } = await (supabase as any)
+        .from("matches")
+        .select("id, need_id, participant_two_id, participant_two_profile_id, partner_name, match_tag, match_score, status, updated_at")
+        .eq("need_id", need.id)
+        .not("status", "in", hiddenFilter)
+        .order("match_score", { ascending: false })
+        .order("updated_at", { ascending: false });
+      if (cancelled) return;
+      if (matchError) {
+        setMatchesError(matchError.message);
+        setRealMatches([]);
+        setSeedFilteredCount(0);
+        setMatchesLoading(false);
+        return;
+      }
+      const profileIds = [
+        ...new Set(
+          ((matchRows ?? []) as any[])
+            .map((row) => row.participant_two_profile_id ?? row.participant_two_id)
+            .filter(Boolean) as string[],
+        ),
+      ];
+      if (!profileIds.length) {
+        setRealMatches([]);
+        setSeedFilteredCount(0);
+        setMatchesLoading(false);
+        return;
+      }
+      const [{ data: profileRows, error: profileError }, { data: cardRows, error: cardError }] =
+        await Promise.all([
+          (supabase as any)
+            .from("profiles")
+            .select("id, username, display_name, avatar_emoji, bio, location, reputation_score, is_simulated")
+            .in("id", profileIds),
+          (supabase as any)
+            .from("information_cards")
+            .select("id, user_id, title, summary, tags, supply_skills, supply_languages, supply_country, supply_city, visibility, created_at")
+            .in("user_id", profileIds)
+            .eq("visibility", "public")
+            .order("created_at", { ascending: false }),
+        ]);
+      if (cancelled) return;
+      if (profileError || cardError) {
+        setMatchesError(profileError?.message ?? cardError?.message ?? "Failed to load matches.");
+        setRealMatches([]);
+        setSeedFilteredCount(0);
+        setMatchesLoading(false);
+        return;
+      }
+      const profiles = new Map<string, any>(((profileRows ?? []) as any[]).map((profile) => [profile.id, profile]));
+      const cardsByProfile = new Map<string, any[]>();
+      for (const card of (cardRows ?? []) as any[]) {
+        cardsByProfile.set(card.user_id, [...(cardsByProfile.get(card.user_id) ?? []), card]);
+      }
+      let filteredSeeds = 0;
+      const real = ((matchRows ?? []) as any[])
+        .map((row): NeedMatch | null => {
+          const partnerId = row.participant_two_profile_id ?? row.participant_two_id;
+          if (!partnerId) return null;
+          const profile = profiles.get(partnerId);
+          if (!profile) return null;
+          if (profile.is_simulated) {
+            filteredSeeds += 1;
+            return null;
+          }
+          const card = (cardsByProfile.get(partnerId) ?? [])[0] ?? null;
+          const username = profile.username ?? row.partner_name ?? partnerId;
+          const displayName = profile.display_name ?? profile.username ?? row.partner_name ?? "Finding user";
+          return {
+            id: row.id,
+            needId: row.need_id,
+            partnerId,
+            username,
+            displayName,
+            avatar: profile.avatar_emoji ?? displayName.slice(0, 1).toUpperCase(),
+            headline: card?.title ?? row.match_tag ?? profile.bio ?? "Finding match",
+            location:
+              profile.location ??
+              [card?.supply_city, card?.supply_country].filter(Boolean).join(", ") ??
+              "Global",
+            score: Number(row.match_score ?? 0),
+            cardId: card?.id ?? null,
+            cardTitle: card?.title ?? null,
+            dataSource: "real_supabase",
+          };
+        })
+        .filter(Boolean) as NeedMatch[];
+      setRealMatches(real);
+      setSeedFilteredCount(filteredSeeds);
+      setMatchesLoading(false);
+    }
+    void loadRealMatches();
+    return () => {
+      cancelled = true;
+    };
+  }, [need]);
+
+  const startChat = async (match: NeedMatch) => {
+    try {
+      const conversationId = await openOrCreateConversation({
+        partnerId: match.partnerId,
+        partnerUsername: match.username,
+        partnerName: match.displayName,
+        sourceNeedId: match.needId,
+        matchId: match.id,
+        matchTag: match.headline,
+      });
+      navigate({ to: "/messages", search: { conversationId } });
+    } catch (error) {
+      toast.error("无法创建对话", {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    }
+  };
+
+  const viewIdentityCard = (match: NeedMatch) => {
+    if (!match.cardId) {
+      toast.info("这个真实匹配暂时没有公开身份卡");
+      return;
+    }
+    navigate({ to: "/cards/$cardId", params: { cardId: match.cardId } });
+  };
+
+  const viewMatch = (match: NeedMatch) => {
+    navigate({ to: "/matches", hash: match.id });
+  };
+
+  const renderMatchDebug = () => (
+    <div className="mt-4 rounded-xl border border-[var(--border)] bg-black/20 px-3 py-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+      <div>data_source: real_supabase</div>
+      <div>need_id: {need?.id ?? "none"}</div>
+      <div>real_match_count: {realMatches.length}</div>
+      <div>seed_filtered_count: {seedFilteredCount}</div>
+    </div>
+  );
+
+  const renderMatchList = (mode: "active" | "completed") => {
+    if (matchesLoading) {
+      return (
+        <div className="mt-4 rounded-xl border border-[var(--border)] bg-white/[0.02] p-4 text-sm text-muted-foreground">
+          正在读取真实匹配...
+        </div>
+      );
+    }
+    if (matchesError) {
+      return (
+        <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          真实匹配读取失败: {matchesError}
+        </div>
+      );
+    }
+    if (realMatches.length === 0) {
+      return (
+        <div className="mt-4 rounded-xl border border-[var(--border)] bg-white/[0.02] p-4 text-sm text-muted-foreground">
+          No real matches yet. AI will keep searching.
+        </div>
+      );
+    }
+    return (
+      <ul className="mt-4 space-y-3">
+        {realMatches.slice(0, mode === "active" ? 3 : realMatches.length).map((match) => (
+          <li
+            key={match.id}
+            className="flex items-center gap-3 rounded-xl border border-transparent bg-white/[0.02] p-3 transition-colors hover:border-[var(--border)]"
+          >
+            <button
+              type="button"
+              onClick={() =>
+                navigate({ to: "/user/$username", params: { username: match.username } })
+              }
+              className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-[image:var(--gradient-primary)] text-sm font-bold text-primary-foreground transition-transform hover:scale-105 active:scale-95"
+              aria-label={`打开 ${match.displayName} 的公开主页`}
+            >
+              {match.avatar}
+            </button>
+            <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() =>
+                  navigate({ to: "/user/$username", params: { username: match.username } })
+                }
+                className="block max-w-full truncate text-left text-sm font-medium hover:text-accent"
+              >
+                {match.displayName}
+              </button>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                <span className="text-accent">匹配度 {Math.round(match.score)}%</span>
+                <span>{match.headline}</span>
+                <span>{match.location}</span>
+                <span>match_id: {match.id.slice(0, 8)}</span>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => viewIdentityCard(match)}
+                className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-[var(--border-strong)] hover:text-foreground active:scale-95"
+              >
+                查看身份卡
+              </button>
+              <button
+                type="button"
+                onClick={() => viewMatch(match)}
+                className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-[var(--border-strong)] hover:text-foreground active:scale-95"
+              >
+                查看匹配
+              </button>
+              <button
+                type="button"
+                onClick={() => void startChat(match)}
+                className="rounded-full bg-[image:var(--gradient-primary)] px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-[var(--shadow-glow)] transition-transform hover:scale-[1.02] active:scale-95"
+              >
+                开始聊天
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    );
+  };
+
   if (!need) return null;
   const meta = statusMeta(status);
   const isArchived = status === "archived" || status === "completed";
   const isClosedLike = isArchived || status === "closed" || status === "paused";
   const isUnfinished = status === "unfinished";
-  const matchCount = mockMatchCount(need.id);
+  const matchCount = realMatches.length;
 
   return (
     <AnimatePresence>
@@ -1115,38 +1353,8 @@ function NeedDetailModal({
                     <p className="text-sm font-semibold">合作伙伴</p>
                     <span className="text-[11px] text-muted-foreground">本次需求</span>
                   </div>
-                  <ul className="mt-4 space-y-3">
-                    {matched.map((m, i) => {
-                      const msgCount = 12 + ((seed + i * 7) % 48);
-                      const partnerDays = Math.max(1, collabDays - (i % 3));
-                      return (
-                        <li
-                          key={m.name}
-                          className="flex items-center gap-3 rounded-xl border border-transparent bg-white/[0.02] p-3 transition-colors hover:border-[var(--border)]"
-                        >
-                          <div
-                            className={`grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br ${m.grad} text-sm font-bold text-white`}
-                          >
-                            {m.initial}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-medium">{m.name}</p>
-                            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
-                              <span className="text-accent">匹配度 {m.score}%</span>
-                              <span>共聊了 {msgCount} 条消息</span>
-                              <span>合作 {partnerDays} 天</span>
-                            </div>
-                          </div>
-                          <button
-                            onClick={() => openMatchedProfile(m)}
-                            className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-[var(--border-strong)] hover:text-foreground active:scale-95"
-                          >
-                            查看资料 →
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  {renderMatchList("completed")}
+                  {renderMatchDebug()}
                 </div>
               </>
             ) : (
@@ -1158,40 +1366,8 @@ function NeedDetailModal({
                   <span className="text-[11px] text-muted-foreground">TOP 3</span>
                 </div>
 
-                <ul className="mt-4 space-y-3">
-                  {matched.map((m) => (
-                    <li
-                      key={m.name}
-                      className="flex items-center gap-3 rounded-xl border border-transparent bg-white/[0.02] p-3 transition-colors hover:border-[var(--border)]"
-                    >
-                      <div
-                        className={`grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br ${m.grad} text-sm font-bold text-white`}
-                      >
-                        {m.initial}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{m.name}</p>
-                        <p className="text-xs text-accent">匹配度 {m.score}%</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() =>
-                            navigate({ to: "/user/$username", params: { username: m.name } })
-                          }
-                          className="rounded-full border border-[var(--border)] px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-[var(--border-strong)] hover:text-foreground active:scale-95"
-                        >
-                          查看作品卡
-                        </button>
-                        <button
-                          onClick={() => openMatchedProfile(m)}
-                          className="rounded-full bg-[image:var(--gradient-primary)] px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-[var(--shadow-glow)] transition-transform hover:scale-[1.02] active:scale-95"
-                        >
-                          查看匹配 →
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+                {renderMatchList("active")}
+                {renderMatchDebug()}
               </div>
             )}
 
