@@ -78,6 +78,18 @@ type Conversation = {
   needId?: string | null;
 };
 
+type MatchConversationRow = {
+  id: string;
+  need_id?: string | null;
+  participant_one_id?: string | null;
+  participant_two_id?: string | null;
+  participant_two_profile_id?: string | null;
+  match_tag?: string | null;
+  updated_at?: string | null;
+  partner_name?: string | null;
+  status?: string | null;
+};
+
 // Demo conversations shown when user has no real matches yet
 const demoConversations: Conversation[] = [
   {
@@ -196,6 +208,8 @@ const SUCCESS_TAGS = [
   "messages.tagRecommend",
 ] as const;
 
+const hiddenStatusFilter = `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`;
+
 const initialThread: Record<string, Message[]> = {
   "1": [
     { id: "seed-1", from: "them", text: "你好!看到你的作品集了,风格非常对味 ✨", time: "14:02" },
@@ -305,6 +319,20 @@ function MessagesPage() {
   const [hasChosenLang, setHasChosenLang] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const loadRequestRef = useRef(0);
+
+  const activateConversation = (matchId: string | null | undefined) => {
+    if (!matchId) return;
+    setActiveConversationId(matchId);
+    setThread([]);
+    setProfile(null);
+    setTranslations({});
+    setConfirmAction(null);
+    setShowRating(false);
+    setShowBlock(false);
+    setShowReport(false);
+    setThreadLoading(true);
+  };
 
   // Load last-chosen translate lang (separate from settings preferred lang)
   useEffect(() => {
@@ -363,70 +391,19 @@ function MessagesPage() {
     });
   };
 
-  const loadRealConversations = async (uid: string, preferredMatchId?: string | null) => {
-    // Load matches where current user is a participant
-    const requestedMatchId = preferredMatchId ?? consumeRequestedMatch();
-    const [r1, r2] = await Promise.all([
-      (supabase as any)
-        .from("matches")
-        .select(
-          "id, need_id, participant_two_id, participant_two_profile_id, match_tag, updated_at, partner_name, status",
-        )
-        .eq("participant_one_id", uid)
-        .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`)
-        .order("updated_at", { ascending: false })
-        .limit(100),
-      (supabase as any)
-        .from("matches")
-        .select("id, need_id, participant_one_id, match_tag, updated_at, partner_name, status")
-        .eq("participant_two_id", uid)
-        .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`)
-        .order("updated_at", { ascending: false })
-        .limit(100),
-    ]);
-    const rows1 = ((r1 as any).data ?? []) as any[];
-    const rows2 = ((r2 as any).data ?? []) as any[];
-    if (!rows1.length && !rows2.length) {
-      setConvs([]);
-      setActiveConversationId("");
-      return;
-    }
+  const hydrateConversations = async (
+    rows: Array<MatchConversationRow & { otherId: string | null | undefined; tag?: string | null; updated?: string | null; partnerName?: string | null; needId?: string | null }>,
+  ): Promise<Conversation[]> => {
+    const matchList = rows.filter((m) => m.otherId);
+    if (!matchList.length) return [];
 
-    // Collect the other participant's ID
-    const matchList = [
-      ...rows1.map((r: any) => ({
-        id: r.id,
-        otherId: r.participant_two_profile_id ?? r.participant_two_id,
-        tag: r.match_tag,
-        updated: r.updated_at,
-        partnerName: r.partner_name,
-        needId: r.need_id,
-      })),
-      ...rows2.map((r: any) => ({
-        id: r.id,
-        otherId: r.participant_one_id,
-        tag: r.match_tag,
-        updated: r.updated_at,
-        partnerName: r.partner_name,
-        needId: r.need_id,
-      })),
-    ].filter((m) => m.otherId);
-
-    if (!matchList.length) {
-      setConvs([]);
-      setActiveConversationId("");
-      return;
-    }
-
-    // Load profiles for other participants
-    const otherIds = matchList.map((m) => m.otherId as string);
+    const otherIds = [...new Set(matchList.map((m) => m.otherId as string))];
     const { data: profiles } = await (supabase as any)
       .from("profiles")
       .select("id, username, avatar_emoji, location, is_simulated")
       .in("id", otherIds);
     const pMap = new Map<string, any>(((profiles as any[]) ?? []).map((p: any) => [p.id, p]));
 
-    // Load last message for each match
     const msgPromises = matchList.map((m) =>
       (supabase as any)
         .from("messages")
@@ -438,26 +415,149 @@ function MessagesPage() {
     );
     const msgResults = await Promise.all(msgPromises);
 
-    const realConvs: Conversation[] = matchList.map((m, i) => {
+    return matchList.map((m, i) => {
       const p = pMap.get(m.otherId as string);
       const lastMsg = (msgResults[i] as any)?.data;
+      const updated = (m.updated ?? m.updated_at ?? new Date().toISOString()) as string;
       return {
         id: m.id as string,
         userId: m.otherId as string,
-        name: (p?.username as string) ?? (m.partnerName as string) ?? t("home.userFallback"),
+        name: (p?.username as string) ?? (m.partnerName as string) ?? (m.partner_name as string) ?? t("home.userFallback"),
         emoji: (p?.avatar_emoji as string) ?? "👤",
         region: (p?.location as string) ?? `🌏 ${t("home.global")}`,
-        preview: lastMsg
-          ? (lastMsg.content as string).slice(0, 30)
-          : t("messages.startConversation"),
-        time: lastMsg ? relTime(lastMsg.created_at as string) : relTime(m.updated as string),
+        preview: lastMsg ? (lastMsg.content as string).slice(0, 30) : t("messages.startConversation"),
+        time: lastMsg ? relTime(lastMsg.created_at as string) : relTime(updated),
         unread: 0,
         online: !!p?.is_simulated,
-        matchTag: (m.tag as string) ?? t("messages.matchingTag"),
+        matchTag: (m.tag as string) ?? (m.match_tag as string) ?? t("messages.matchingTag"),
         isSimulated: !!p?.is_simulated,
-        needId: m.needId as string | undefined,
+        needId: (m.needId ?? m.need_id) as string | undefined,
       };
     });
+  };
+
+  const loadConversationById = async (uid: string, matchId: string): Promise<Conversation | null> => {
+    const { data, error } = await (supabase as any)
+      .from("matches")
+      .select(
+        "id, need_id, participant_one_id, participant_two_id, participant_two_profile_id, match_tag, updated_at, partner_name, status",
+      )
+      .eq("id", matchId)
+      .limit(1);
+    if (error) {
+      console.warn("[messages] load conversation by id failed:", error.message);
+      return null;
+    }
+    const row = ((data as MatchConversationRow[]) ?? [])[0];
+    if (!row) return null;
+    if (row.status && HIDDEN_CONVERSATION_STATUSES.includes(row.status)) return null;
+    const isOwner = row.participant_one_id === uid;
+    const isSecondUser = row.participant_two_id === uid;
+    const otherId = isOwner
+      ? row.participant_two_profile_id ?? row.participant_two_id
+      : isSecondUser
+        ? row.participant_one_id
+        : row.participant_two_profile_id ?? row.participant_two_id;
+    if (!otherId) return null;
+    const [conversation] = await hydrateConversations([
+      {
+        ...row,
+        otherId,
+        tag: row.match_tag,
+        updated: row.updated_at,
+        partnerName: row.partner_name,
+        needId: row.need_id,
+      },
+    ]);
+    return conversation ?? null;
+  };
+
+  const loadRealConversations = async (uid: string, preferredMatchId?: string | null) => {
+    // Load matches where current user is a participant
+    const requestedMatchId = preferredMatchId ?? consumeRequestedMatch();
+    const requestId = ++loadRequestRef.current;
+    const [r1, r2] = await Promise.all([
+      (supabase as any)
+        .from("matches")
+        .select(
+          "id, need_id, participant_two_id, participant_two_profile_id, match_tag, updated_at, partner_name, status",
+        )
+        .eq("participant_one_id", uid)
+        .not("status", "in", hiddenStatusFilter)
+        .order("updated_at", { ascending: false })
+        .limit(100),
+      (supabase as any)
+        .from("matches")
+        .select("id, need_id, participant_one_id, match_tag, updated_at, partner_name, status")
+        .eq("participant_two_id", uid)
+        .not("status", "in", hiddenStatusFilter)
+        .order("updated_at", { ascending: false })
+        .limit(100),
+    ]);
+    const rows1 = ((r1 as any).data ?? []) as any[];
+    const rows2 = ((r2 as any).data ?? []) as any[];
+    if (requestId !== loadRequestRef.current) return;
+    if (!rows1.length && !rows2.length) {
+      if (requestedMatchId) {
+        const requestedConversation = await loadConversationById(uid, requestedMatchId);
+        if (requestId !== loadRequestRef.current) return;
+        if (requestedConversation) {
+          setConvs([requestedConversation]);
+          setActiveConversationId(requestedConversation.id);
+          return;
+        }
+      }
+      setConvs([]);
+      setActiveConversationId("");
+      return;
+    }
+
+    // Collect the other participant's ID
+    const matchList = [
+      ...rows1.map((r: any) => ({
+        ...r,
+        id: r.id,
+        otherId: r.participant_two_profile_id ?? r.participant_two_id,
+        tag: r.match_tag,
+        updated: r.updated_at,
+        partnerName: r.partner_name,
+        needId: r.need_id,
+      })),
+      ...rows2.map((r: any) => ({
+        ...r,
+        id: r.id,
+        otherId: r.participant_one_id,
+        tag: r.match_tag,
+        updated: r.updated_at,
+        partnerName: r.partner_name,
+        needId: r.need_id,
+      })),
+    ].filter((m) => m.otherId);
+
+    if (!matchList.length) {
+      if (requestedMatchId) {
+        const requestedConversation = await loadConversationById(uid, requestedMatchId);
+        if (requestId !== loadRequestRef.current) return;
+        if (requestedConversation) {
+          setConvs([requestedConversation]);
+          setActiveConversationId(requestedConversation.id);
+          return;
+        }
+      }
+      setConvs([]);
+      setActiveConversationId("");
+      return;
+    }
+
+    let realConvs = await hydrateConversations(matchList);
+    if (requestId !== loadRequestRef.current) return;
+    if (requestedMatchId && !realConvs.some((c) => c.id === requestedMatchId)) {
+      const requestedConversation = await loadConversationById(uid, requestedMatchId);
+      if (requestId !== loadRequestRef.current) return;
+      if (requestedConversation) {
+        realConvs = [requestedConversation, ...realConvs.filter((c) => c.id !== requestedConversation.id)];
+      }
+    }
 
     // Only show real conversations — no demo fallback
     setConvs(realConvs);
@@ -492,7 +592,7 @@ function MessagesPage() {
 
   useEffect(() => {
     if (!user || !searchConversationId) return;
-    setActiveConversationId(searchConversationId);
+    activateConversation(searchConversationId);
     void loadRealConversations(user.id, searchConversationId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, searchConversationId]);
@@ -501,6 +601,7 @@ function MessagesPage() {
     if (!user) return;
     const onConversationOpened = (event: Event) => {
       const matchId = (event as CustomEvent<{ matchId?: string }>).detail?.matchId ?? null;
+      activateConversation(matchId);
       void loadRealConversations(user.id, matchId);
     };
     window.addEventListener(CONVERSATION_OPENED_EVENT, onConversationOpened);
