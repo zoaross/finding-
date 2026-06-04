@@ -94,7 +94,7 @@ const copy = {
           "Write the real need in plain language. AI matches the demand with people whose visible supply cards make sense.",
         ],
       ],
-      mock: {
+      preview: {
         need: "Need #2841",
         matches: "Real matches",
         said: "You just said",
@@ -110,12 +110,12 @@ const copy = {
       titleA: "Real signals",
       titleB: "from around the world",
       items: [
-        ["Lin Zijin", "Independent writer", "I wrote one need and three people reached out within 48 hours."],
-        ["Aiko Tanaka", "Digital nomad", "I found a surfing friend in Bali, and translation made it easy."],
-        ["Marcus Chen", "Trade founder", "AI translated my need clearly enough to reach a German supplier."],
-        ["Sofia Reyes", "Documentary director", "I found a remote editor from Mexico to Seoul."],
-        ["Omar Khalil", "Music producer", "My need stayed alive, and new collaborators appeared weeks later."],
-        ["Hannah Park", "Product designer", "It feels more human than search. One sentence was enough."],
+        ["Real saved data", "Supabase only", "Production surfaces show records created or saved by real authenticated users."],
+        ["No seed profiles", "Filtered output", "Simulated profiles are hidden unless test mode is explicitly enabled."],
+        ["Supply cards", "Identity layer", "Cards describe what someone can offer, not what they are requesting."],
+        ["Demand posts", "Find layer", "Needs remain lightweight intent posts that can receive real matches later."],
+        ["Messages", "Relationship layer", "Conversations are created through one shared Supabase chat flow."],
+        ["Debug labels", "Temporary QA", "Counts show real source and filtered seed totals during stabilization."],
       ],
     },
     cta: {
@@ -194,7 +194,7 @@ const copy = {
         ["社交连接", "找约饭搭子、旅伴、聊天对象", "Finding 让连接发生在想要的瞬间，并把匹配度和翻译放进社交流程。"],
         ["创业团队", "找开发者、设计师、合作者", "用自然语言写真实需求，AI 匹配那些公开供给卡片真正合适的人。"],
       ],
-      mock: {
+      preview: {
         need: "需求 #2841",
         matches: "真实匹配",
         said: "你刚才说",
@@ -210,12 +210,12 @@ const copy = {
       titleA: "来自全球的",
       titleB: "真实回声",
       items: [
-        ["林子衿", "独立作者", "写完需求 48 小时，三个人主动联系。"],
-        ["Aiko Tanaka", "数字游民", "在巴厘岛找到了一起冲浪的搭子，AI 翻译让沟通毫无障碍。"],
-        ["Marcus Chen", "外贸创业者", "AI 把我的中文需求清楚传达给德国供应商。"],
-        ["Sofia Reyes", "纪录片导演", "找到了愿意远程协作的剪辑师，从墨西哥到首尔。"],
-        ["Omar Khalil", "音乐制作人", "需求被持续保存，几周后还有新的合作邀请。"],
-        ["Hannah Park", "产品设计师", "比搜索更像真实社交。一句话就够了。"],
+        ["真实保存数据", "仅 Supabase", "生产界面只显示真实登录用户创建或保存的记录。"],
+        ["隐藏种子资料", "过滤输出", "除非显式开启测试模式，否则模拟资料不会出现在生产 UI。"],
+        ["供给卡片", "身份层", "卡片描述一个人能提供什么，而不是他正在寻找什么。"],
+        ["需求发布", "Find 层", "需求保持轻量自然，后续只接收真实匹配。"],
+        ["消息系统", "关系层", "所有对话都通过统一的 Supabase 聊天流程创建。"],
+        ["调试标签", "临时 QA", "稳定期显示真实来源与过滤种子数量，方便排查。"],
       ],
     },
     cta: {
@@ -294,7 +294,7 @@ const copy = {
         ["소셜 연결", "식사 친구, 여행 동행, 대화 상대 찾기", "요청이 생긴 순간 연결이 일어나고, 호환성과 번역이 흐름 안에 들어옵니다."],
         ["스타트업 팀", "개발자, 디자이너, 협업자 찾기", "진짜 요청을 자연어로 쓰면 AI가 공개된 아이덴티티 카드와 맞는 사람을 연결합니다."],
       ],
-      mock: {
+      preview: {
         need: "요청 #2841",
         matches: "실제 매칭",
         said: "방금 이렇게 말했어요",
@@ -310,12 +310,12 @@ const copy = {
       titleA: "전 세계에서 온",
       titleB: "진짜 반응",
       items: [
-        ["Lin Zijin", "독립 작가", "필요를 올리고 48시간 안에 세 명이 먼저 연락했어요."],
-        ["Aiko Tanaka", "디지털 노마드", "발리에서 서핑 친구를 찾았고 번역 덕분에 편하게 대화했어요."],
-        ["Marcus Chen", "무역 창업자", "AI가 제 필요를 독일 공급업체에게 정확히 전달해 줬어요."],
-        ["Sofia Reyes", "다큐멘터리 감독", "멕시코에서 서울까지 원격으로 함께할 편집자를 찾았어요."],
-        ["Omar Khalil", "음악 프로듀서", "요청이 계속 남아 있어서 몇 주 뒤에도 새 협업 제안이 왔어요."],
-        ["Hannah Park", "프로덕트 디자이너", "검색보다 훨씬 사람답습니다. 한 문장이면 충분했어요."],
+        ["실제 저장 데이터", "Supabase 전용", "프로덕션 화면에는 실제 로그인 사용자가 만들거나 저장한 기록만 표시됩니다."],
+        ["시드 프로필 숨김", "출력 필터링", "테스트 모드를 명시적으로 켜지 않으면 시뮬레이션 자료는 보이지 않습니다."],
+        ["공급 카드", "아이덴티티 계층", "카드는 사용자가 무엇을 찾는지가 아니라 무엇을 제공할 수 있는지 설명합니다."],
+        ["요청 게시", "Find 계층", "요청은 가볍고 자연스럽게 유지되며, 이후 실제 매칭만 받습니다."],
+        ["메시지", "관계 계층", "모든 대화는 하나의 Supabase 채팅 흐름으로 생성됩니다."],
+        ["디버그 라벨", "임시 QA", "안정화 중에는 실제 소스와 필터링된 시드 수를 표시합니다."],
       ],
     },
     cta: {

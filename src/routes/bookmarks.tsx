@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { StarField } from "@/components/StarField";
 import { supabase } from "@/lib/supabase";
 import { openOrCreateConversation } from "@/lib/chat";
+import { TEST_MODE } from "@/lib/envFlags";
 import {
   setSavedCard,
   setSavedNeed,
@@ -63,7 +64,6 @@ type SavedUser = {
   flag: string;
   location: string;
   identities: string[];
-  matchPct?: number;
 };
 
 type SavedCard = {
@@ -88,12 +88,6 @@ function relTime(iso: string) {
   return new Date(iso).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
-function idHash(id: string, mod: number, offset = 0) {
-  return (
-    (Math.abs(id.split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 0)) % mod) + offset
-  );
-}
-
 function BookmarksPage() {
   const navigate = useNavigate();
   const { t } = useI18n();
@@ -103,11 +97,14 @@ function BookmarksPage() {
   const [users, setUsers] = useState<SavedUser[]>([]);
   const [cards, setCards] = useState<SavedCard[]>([]);
   const [loading, setLoading] = useState(true);
+  const [seedFilteredCount, setSeedFilteredCount] = useState(0);
 
   // ── Load only items explicitly saved by current user ────────────────────
   const loadSavedItems = async (uid: string) => {
     setLoading(true);
+    setSeedFilteredCount(0);
     try {
+      let filteredSeeds = 0;
       const [needSaveRows, userSaveRows, cardSaveRows, portfolioSaveRows] = await Promise.all([
         (supabase as any)
           .from("saved_needs")
@@ -162,7 +159,7 @@ function BookmarksPage() {
         const { data: profiles } = needUserIds.length
           ? await (supabase as any)
               .from("profiles")
-              .select("id, username, avatar_emoji")
+              .select("id, username, avatar_emoji, is_simulated")
               .in("id", needUserIds)
           : { data: [] };
         const profileMap = new Map<string, any>(
@@ -172,6 +169,14 @@ function BookmarksPage() {
         setNeeds(
           ((needRows as any[]) ?? [])
             .sort((a: any, b: any) => (needOrder.get(a.id) ?? 0) - (needOrder.get(b.id) ?? 0))
+            .filter((n: any) => {
+              const profile = profileMap.get(n.user_id as string);
+              if (profile?.is_simulated && !TEST_MODE) {
+                filteredSeeds += 1;
+                return false;
+              }
+              return true;
+            })
             .map((n: any) => {
               const profile = profileMap.get(n.user_id as string);
               return {
@@ -195,12 +200,19 @@ function BookmarksPage() {
       if (savedUserIds.length) {
         const { data: profileRows } = await (supabase as any)
           .from("profiles")
-          .select("id, username, bio, location, avatar_emoji, skills")
+          .select("id, username, bio, location, avatar_emoji, skills, is_simulated")
           .in("id", savedUserIds);
         const userOrder = new Map(savedUserIds.map((id, index) => [id, index]));
         setUsers(
           ((profileRows as any[]) ?? [])
             .sort((a: any, b: any) => (userOrder.get(a.id) ?? 0) - (userOrder.get(b.id) ?? 0))
+            .filter((p: any) => {
+              if (p.is_simulated && !TEST_MODE) {
+                filteredSeeds += 1;
+                return false;
+              }
+              return true;
+            })
             .map((p: any) => ({
               id: p.id as string,
               emoji:
@@ -211,8 +223,7 @@ function BookmarksPage() {
               identities:
                 Array.isArray(p.skills) && (p.skills as string[]).length
                   ? (p.skills as string[]).slice(0, 3)
-                  : [t("home.findingUser")],
-              matchPct: idHash(p.id as string, 15, 82),
+                  : [],
             })),
         );
       } else {
@@ -231,7 +242,7 @@ function BookmarksPage() {
         const { data: profiles } = cardUserIds.length
           ? await (supabase as any)
               .from("profiles")
-              .select("id, username, avatar_emoji")
+              .select("id, username, avatar_emoji, is_simulated")
               .in("id", cardUserIds)
           : { data: [] };
         const profileMap = new Map<string, any>(
@@ -241,21 +252,25 @@ function BookmarksPage() {
         nextCards.push(
           ...((cardRows as any[]) ?? [])
             .sort((a: any, b: any) => (cardOrder.get(a.id) ?? 0) - (cardOrder.get(b.id) ?? 0))
-            .map((card: any) => {
+            .flatMap((card: any) => {
               const profile = profileMap.get(card.user_id as string);
+              if (!profile || (profile.is_simulated && !TEST_MODE)) {
+                if (profile?.is_simulated) filteredSeeds += 1;
+                return [];
+              }
               const mediaUrls = Array.isArray(card.media_urls) ? (card.media_urls as string[]) : [];
-              return {
+              return [{
                 id: card.id as string,
                 source: "identity_card" as const,
                 ownerId: card.user_id as string,
-                emoji: (profile?.avatar_emoji as string) ?? "⭐",
-                ownerName: (profile?.username as string) ?? t("home.userFallback"),
+                emoji: (profile.avatar_emoji as string) ?? "⭐",
+                ownerName: (profile.username as string) ?? t("home.userFallback"),
                 title: (card.title as string) ?? t("bookmarks.viewCard"),
                 category: (card.category as string) ?? "Skill",
                 summary: (card.summary as string) ?? "",
                 tags: Array.isArray(card.tags) ? (card.tags as string[]).slice(0, 4) : [],
                 mediaUrl: mediaUrls[0],
-              };
+              }];
             }),
         );
       }
@@ -270,7 +285,7 @@ function BookmarksPage() {
         const { data: profiles } = portfolioUserIds.length
           ? await (supabase as any)
               .from("profiles")
-              .select("id, username, avatar_emoji")
+              .select("id, username, avatar_emoji, is_simulated")
               .in("id", portfolioUserIds)
           : { data: [] };
         const profileMap = new Map<string, any>(
@@ -282,34 +297,40 @@ function BookmarksPage() {
             .sort(
               (a: any, b: any) => (portfolioOrder.get(a.id) ?? 0) - (portfolioOrder.get(b.id) ?? 0),
             )
-            .map((item: any) => {
+            .flatMap((item: any) => {
               const profile = profileMap.get(item.user_id as string);
+              if (!profile || (profile.is_simulated && !TEST_MODE)) {
+                if (profile?.is_simulated) filteredSeeds += 1;
+                return [];
+              }
               const mediaUrls = Array.isArray(item.media_urls)
                 ? (item.media_urls as string[])
                 : item.media_url
                   ? [item.media_url as string]
                   : [];
-              return {
+              return [{
                 id: item.id as string,
                 source: "portfolio_item" as const,
                 ownerId: item.user_id as string,
-                emoji: (profile?.avatar_emoji as string) ?? "🖼️",
-                ownerName: (profile?.username as string) ?? t("home.userFallback"),
+                emoji: (profile.avatar_emoji as string) ?? "🖼️",
+                ownerName: (profile.username as string) ?? t("home.userFallback"),
                 title: (item.title as string) ?? t("bookmarks.viewCard"),
                 category: (item.role as string) ?? "Portfolio",
                 summary: (item.description as string) ?? "",
                 tags: Array.isArray(item.tools) ? (item.tools as string[]).slice(0, 4) : [],
                 mediaUrl: mediaUrls[0],
-              };
+              }];
             }),
         );
       }
       setCards(nextCards);
+      setSeedFilteredCount(filteredSeeds);
     } catch (error) {
       console.warn("[bookmarks] load failed:", error);
       setNeeds([]);
       setUsers([]);
       setCards([]);
+      setSeedFilteredCount(0);
     } finally {
       setLoading(false);
     }
@@ -523,6 +544,17 @@ function BookmarksPage() {
               {t("bookmarks.summary", {
                 n: needs.length + users.length + cards.length,
               })}
+            </p>
+            <p className="mt-3 font-mono text-[10px] leading-relaxed text-muted-foreground/70">
+              data_source: real_supabase
+              <br />
+              saved_users_count: {users.length}
+              <br />
+              saved_cards_count: {cards.length}
+              <br />
+              saved_needs_count: {needs.length}
+              <br />
+              seed_filtered_count: {seedFilteredCount}
             </p>
           </motion.section>
 
@@ -759,11 +791,6 @@ function UserCard({
             <p className="truncate text-base font-display font-bold">
               {user.name} <span className="ml-1">{user.flag}</span>
             </p>
-            {typeof user.matchPct === "number" && (
-              <span className="shrink-0 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent-soft">
-                {t("bookmarks.matchPct", { n: user.matchPct })}
-              </span>
-            )}
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">{user.location}</p>
         </div>

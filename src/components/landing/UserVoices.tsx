@@ -5,10 +5,10 @@ const flags = ["🇨🇳", "🇯🇵", "🇩🇪", "🇲🇽", "🇦🇪", "🇰
 
 export function UserVoices() {
   const { copy } = useLandingLanguage();
-  const voices = copy.voices.items.map(([name, role, quote], index) => ({
-    name,
-    role,
-    quote,
+  const voices = copy.voices.items.map(([signal, context, note], index) => ({
+    signal,
+    context,
+    note,
     flag: flags[index],
   }));
 
@@ -33,7 +33,7 @@ export function UserVoices() {
         <div className="mt-14 grid gap-5 md:grid-cols-3">
           {voices.map((v, i) => (
             <motion.figure
-              key={v.name}
+              key={v.signal}
               initial={{ opacity: 0, y: 30 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true, margin: "-60px" }}
@@ -42,15 +42,15 @@ export function UserVoices() {
             >
               <blockquote className="flex-1 text-sm leading-relaxed text-foreground/90">
                 <span className="mr-1 font-display text-2xl text-accent">“</span>
-                {v.quote}
+                {v.note}
               </blockquote>
               <figcaption className="mt-5 flex items-center gap-3 border-t border-border pt-4">
                 <div className="grid h-9 w-9 place-items-center rounded-full bg-[image:var(--gradient-primary)] font-display text-xs font-bold">
-                  {v.name[0]}
+                  {v.signal[0]}
                 </div>
                 <div className="flex-1">
-                  <div className="text-sm font-medium">{v.name}</div>
-                  <div className="text-xs text-muted-foreground">{v.role}</div>
+                  <div className="text-sm font-medium">{v.signal}</div>
+                  <div className="text-xs text-muted-foreground">{v.context}</div>
                 </div>
                 <span className="text-lg" aria-hidden>{v.flag}</span>
               </figcaption>

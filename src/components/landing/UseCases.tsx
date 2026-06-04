@@ -2,21 +2,21 @@ import { motion } from "framer-motion";
 import { IconUser, IconChat, IconTarget } from "@/components/icons/FindingIcons";
 import { useLandingLanguage } from "./landingI18n";
 
-function Mockup({ kind }: { kind: string }) {
+function Preview({ kind }: { kind: string }) {
   const { copy } = useLandingLanguage();
-  const mock = copy.useCases.mock;
+  const preview = copy.useCases.preview;
 
   if (kind === "creators") {
     return (
       <div className="glass-card relative overflow-hidden rounded-3xl p-5">
         <div className="flex items-center justify-between border-b border-border pb-3">
-          <div className="text-xs text-muted-foreground">{mock.need}</div>
+          <div className="text-xs text-muted-foreground">{preview.need}</div>
           <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] text-success">
-            {mock.matches}
+            {preview.matches}
           </span>
         </div>
         <div className="mt-4 space-y-3">
-          {["Yuki · Kyoto · visual illustrator", "M. Chen · Taipei · digital ink", "Anya · Seoul · fantasy artist"].map((t, i) => (
+          {["Visible identity card", "Supply card with proof", "Public profile signal"].map((t, i) => (
             <div key={i} className="flex items-center gap-3 rounded-2xl border border-border bg-muted/30 p-3">
               <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[image:var(--gradient-primary)] text-xs font-bold">{t[0]}</div>
               <div className="flex-1">
@@ -36,12 +36,12 @@ function Mockup({ kind }: { kind: string }) {
     return (
       <div className="glass-card relative overflow-hidden rounded-3xl p-5">
         <div className="rounded-2xl bg-muted/30 p-4 text-sm">
-          <div className="text-muted-foreground text-xs">{mock.said}</div>
-          <div className="mt-1">{mock.socialNeed}</div>
+          <div className="text-muted-foreground text-xs">{preview.said}</div>
+          <div className="mt-1">{preview.socialNeed}</div>
         </div>
         <div className="mt-3 flex items-start justify-end">
           <div className="max-w-[80%] rounded-2xl bg-[image:var(--gradient-primary)] p-4 text-sm text-primary-foreground">
-            {mock.socialReply}
+            {preview.socialReply}
           </div>
         </div>
         <div className="mt-4 flex gap-2">
@@ -55,18 +55,18 @@ function Mockup({ kind }: { kind: string }) {
   return (
     <div className="glass-card relative overflow-hidden rounded-3xl p-5">
       <div className="text-xs text-muted-foreground">JD · Senior Product Designer</div>
-      <div className="mt-2 font-display text-lg">{mock.scanning}</div>
+      <div className="mt-2 font-display text-lg">{preview.scanning}</div>
       <div className="mt-4 grid grid-cols-3 gap-2 text-[10px]">
         {["Berlin", "Lisbon", "Tokyo", "NYC", "São Paulo", "Bali"].map((c, i) => (
           <div key={c} className="rounded-xl border border-border bg-muted/30 p-2">
             <div className="text-muted-foreground">{c}</div>
-            <div className="mt-1 font-display text-foreground">{mock.candidates}</div>
+            <div className="mt-1 font-display text-foreground">{preview.candidates}</div>
           </div>
         ))}
       </div>
       <div className="mt-4 flex items-center gap-2 text-xs">
         <span className="h-2 w-2 animate-pulse rounded-full bg-success" />
-        <span className="text-muted-foreground">{mock.joining}</span>
+        <span className="text-muted-foreground">{preview.joining}</span>
       </div>
     </div>
   );
@@ -75,13 +75,13 @@ function Mockup({ kind }: { kind: string }) {
 export function UseCases() {
   const { copy } = useLandingLanguage();
   const icons = [IconUser, IconChat, IconTarget];
-  const mockups = ["creators", "social", "hiring"];
+  const previews = ["creators", "social", "hiring"];
   const cases = copy.useCases.cases.map(([tag, title, desc], index) => ({
     tag,
     title,
     desc,
     Icon: icons[index],
-    mockup: mockups[index],
+    preview: previews[index],
   }));
 
   return (
@@ -126,7 +126,7 @@ export function UseCases() {
                   viewport={{ once: true, margin: "-100px" }}
                   transition={{ duration: 0.8, ease: [0.2, 0.8, 0.2, 1] }}
                 >
-                  <Mockup kind={c.mockup} />
+                  <Preview kind={c.preview} />
                 </motion.div>
               </div>
             );

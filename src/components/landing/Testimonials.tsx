@@ -2,22 +2,22 @@ import { motion } from "framer-motion";
 
 const items = [
   {
-    quote: "我只是写了句『想找个会日语的设计师合作小说封面』，48 小时后真的接到了三个人的私信。",
-    name: "林子衿",
-    role: "独立作者 · 上海",
-    tag: "创作合作",
+    quote: "生产界面只显示真实登录用户创建、保存或匹配出来的数据。",
+    name: "Real data",
+    role: "Supabase source",
+    tag: "数据源",
   },
   {
-    quote: "找供应商不再翻遍展会名片。AI 直接把我的需求翻成英文匹配到德国工厂，省了一个月。",
-    name: "Marcus Chen",
-    role: "外贸创业者 · 深圳",
-    tag: "B2B 采购",
+    quote: "模拟资料只允许在显式测试模式中出现，默认生产模式全部过滤。",
+    name: "Seed filter",
+    role: "TEST_MODE=false",
+    tag: "过滤",
   },
   {
-    quote: "想学冲浪、想找搭子、想交换技能 —— 一句话扔进去就行，比社群高效太多。",
-    name: "Aiko Tanaka",
-    role: "数字游民 · 巴厘岛",
-    tag: "生活兴趣",
+    quote: "Saved、Matches、Messages 都必须从统一 Supabase 数据链路读取。",
+    name: "Unified source",
+    role: "No fallback UI",
+    tag: "一致性",
   },
 ];
 
