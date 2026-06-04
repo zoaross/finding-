@@ -86,119 +86,6 @@ type NearbyLocation = {
   region: string | null;
 };
 
-// Empty export — real data loaded from DB; kept for SearchDropdown import
-export const mockNeeds: NeedItem[] = [];
-
-const _legacyMock: NeedItem[] = [
-  {
-    id: "1",
-    userId: null,
-    emoji: "🎨",
-    name: "luna_bjd",
-    flag: "🇰🇷",
-    ago: "3 分钟前",
-    views: 248,
-    content: "寻找 BJD 娃娃定制画师,暗黑奇幻风格,长期合作,可面议预算。",
-    tags: ["BJD", "插画", "创意"],
-    heat: 5,
-    region: "韩国",
-    city: "首尔",
-  },
-  {
-    id: "2",
-    userId: null,
-    emoji: "💻",
-    name: "startup_ceo",
-    flag: "🇺🇸",
-    ago: "12 分钟前",
-    views: 512,
-    content: "招聘 React 前端工程师,远程优先,长期合作,熟悉 TanStack 与 Tailwind。",
-    tags: ["技术", "远程", "招聘"],
-    heat: 5,
-    region: "美国",
-    city: "纽约",
-  },
-  {
-    id: "3",
-    userId: null,
-    emoji: "🍜",
-    name: "foodie_서울",
-    flag: "🇰🇷",
-    ago: "26 分钟前",
-    views: 134,
-    content: "找周末约饭搭子,江南区附近探店,口味不挑,只求一起开心吃。",
-    tags: ["社交", "约饭", "首尔"],
-    heat: 3,
-    region: "韩国",
-    city: "首尔",
-  },
-  {
-    id: "4",
-    userId: null,
-    emoji: "🎵",
-    name: "indie_music",
-    flag: "🇯🇵",
-    ago: "44 分钟前",
-    views: 198,
-    content: "寻找词曲合作伙伴,一起做 EP,city pop / lo-fi 方向,中日双语都可。",
-    tags: ["音乐", "创意", "合作"],
-    heat: 4,
-    region: "日本",
-    city: "东京",
-  },
-  {
-    id: "5",
-    emoji: "💬",
-    name: "anon_user",
-    flag: "🌏",
-    ago: "1 小时前",
-    views: 87,
-    content: "最近压力很大,想找人聊聊天。不需要建议,只想被听见。",
-    tags: ["倾诉", "陪伴"],
-    heat: 3,
-    region: "其他",
-    city: "全球",
-  },
-  {
-    id: "6",
-    emoji: "📸",
-    name: "photo_kim",
-    flag: "🇰🇷",
-    ago: "1 小时前",
-    views: 312,
-    content: "需要摄影师拍形象照,弘大附近,自然光风格,周末出片。",
-    tags: ["摄影", "首尔", "技能"],
-    heat: 4,
-    region: "韩国",
-    city: "首尔",
-  },
-  {
-    id: "7",
-    emoji: "🎮",
-    name: "game_dev",
-    flag: "🇩🇪",
-    ago: "2 小时前",
-    views: 421,
-    content: "寻找独立游戏美术师,像素风格,Roguelike 题材,可分成可现金。",
-    tags: ["游戏", "设计", "合作"],
-    heat: 4,
-    region: "欧洲",
-    city: "柏林",
-  },
-  {
-    id: "8",
-    emoji: "📚",
-    name: "study_buddy",
-    flag: "🇸🇬",
-    ago: "3 小时前",
-    views: 165,
-    content: "备考 TOPIK 6 级,找学习搭子互相监督,每天打卡 + 周末复盘。",
-    tags: ["学习", "韩语", "社交"],
-    heat: 3,
-    region: "东南亚",
-    city: "新加坡",
-  },
-];
 
 // City positions for globe (lat/lng only — counts loaded from DB)
 const CITY_POSITIONS: GlobeCity[] = [
@@ -450,24 +337,28 @@ function DiscoverPage() {
     const userIds = [...new Set((rows as any[]).map((r: any) => r.user_id as string))];
     const { data: profs } = await (supabase as any)
       .from("profiles")
-      .select("id, username, avatar_emoji, country, city, region")
+      .select("id, username, avatar_emoji, country, city, region, is_simulated")
       .in("id", userIds);
     const profileMap = new Map<
       string,
       { username: string; emoji: string; country: string | null; city: string | null; region: string | null }
     >(
-      ((profs as any[]) ?? []).map((p: any) => [
-        p.id as string,
-        {
-          username: (p.username as string) ?? t("home.userFallback"),
-          emoji: (p.avatar_emoji as string) ?? "📝",
-          country: (p.country as string) ?? null,
-          city: (p.city as string) ?? null,
-          region: (p.region as string) ?? null,
-        },
-      ]),
+      ((profs as any[]) ?? [])
+        .filter((p: any) => !p.is_simulated)
+        .map((p: any) => [
+          p.id as string,
+          {
+            username: (p.username as string) ?? t("home.userFallback"),
+            emoji: (p.avatar_emoji as string) ?? "📝",
+            country: (p.country as string) ?? null,
+            city: (p.city as string) ?? null,
+            region: (p.region as string) ?? null,
+          },
+        ]),
     );
-    const visibleRows = (rows as any[]).filter((r: any) => !hiddenPartnerIds.has(r.user_id as string));
+    const visibleRows = (rows as any[]).filter(
+      (r: any) => !hiddenPartnerIds.has(r.user_id as string) && profileMap.has(r.user_id as string),
+    );
     const items: NeedItem[] = visibleRows.map((r: any) => {
       const intent = r.parsed_intent as Record<string, unknown> | null;
       const tags = Array.isArray(intent?.tags) ? (intent!.tags as string[]) : [];
@@ -510,15 +401,14 @@ function DiscoverPage() {
     setDisplayCities(CITY_POSITIONS.map((c) => ({ ...c, count: cityCount[c.name] ?? 0 })));
   };
 
-  // Live counter — seeded with real profiles count
+  // Live counter — real non-simulated profiles count only
   const [liveBase, setLiveBase] = useState(0);
   useEffect(() => {
     (supabase as any)
       .from("profiles")
       .select("id", { count: "exact", head: true })
+      .eq("is_simulated", false)
       .then(({ count }: { count: number | null }) => setLiveBase(count ?? 0));
-    const id = setInterval(() => setLiveBase((v) => v + Math.floor(Math.random() * 3)), 3000);
-    return () => clearInterval(id);
   }, []);
   const liveCount = useCounter(liveBase, 600);
 

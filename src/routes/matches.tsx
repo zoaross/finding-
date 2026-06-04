@@ -4,7 +4,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { StarField } from "@/components/StarField";
 import { FindingMark } from "@/components/icons/FindingIcons";
-import { HIDDEN_CONVERSATION_STATUSES, openOrCreateConversation } from "@/lib/chat";
+import { openOrCreateConversation } from "@/lib/chat";
+import { getRealMatchesForUser, type RealMatch } from "@/lib/realMatches";
 import { setSavedUser } from "@/lib/socialActions";
 import { supabase } from "@/lib/supabase";
 
@@ -18,71 +19,6 @@ export const Route = createFileRoute("/matches")({
   }),
 });
 
-type MatchRow = {
-  id: string;
-  need_id: string | null;
-  participant_one_id: string | null;
-  participant_two_id: string | null;
-  participant_two_profile_id: string | null;
-  partner_name: string | null;
-  match_tag: string | null;
-  match_score: number | null;
-  status: string | null;
-  updated_at: string | null;
-};
-
-type ProfileRow = {
-  id: string;
-  username: string | null;
-  display_name: string | null;
-  avatar_emoji: string | null;
-  bio: string | null;
-  location: string | null;
-  reputation_score: number | null;
-  is_simulated: boolean | null;
-};
-
-type IdentityCardRow = {
-  id: string;
-  user_id: string;
-  title: string;
-  category: string | null;
-  summary: string | null;
-  details: string | null;
-  tags: string[] | null;
-  supply_skills?: string[] | null;
-  supply_languages?: string[] | null;
-  supply_country?: string | null;
-  supply_city?: string | null;
-  offer_summary?: string | null;
-  connection_preferences?: string | null;
-  media_urls?: string[] | null;
-  voice_intro_url?: string | null;
-  reputation_score?: number | null;
-  response_rate?: number | null;
-};
-
-type RealMatch = {
-  id: string;
-  needId: string | null;
-  profileId: string;
-  username: string;
-  displayName: string;
-  avatar: string;
-  headline: string;
-  location: string;
-  score: number;
-  reputation: number;
-  status: string;
-  updatedAt: string | null;
-  cards: IdentityCardRow[];
-  dataSource: "real_supabase";
-};
-
-function initials(name: string) {
-  return name.trim().slice(0, 1).toUpperCase() || "F";
-}
-
 function formatTime(iso: string | null) {
   if (!iso) return "最近";
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -93,16 +29,6 @@ function formatTime(iso: string | null) {
   return new Date(iso).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
-function showSimulatedMatches() {
-  const envEnabled = import.meta.env.VITE_SHOW_SIMULATED_MATCHES === "true";
-  if (envEnabled) return true;
-  try {
-    return localStorage.getItem("finding:test-mode") === "true";
-  } catch {
-    return false;
-  }
-}
-
 function MatchesPage() {
   const navigate = useNavigate();
   const [matches, setMatches] = useState<RealMatch[]>([]);
@@ -110,6 +36,7 @@ function MatchesPage() {
   const [saved, setSaved] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [seedFilteredCount, setSeedFilteredCount] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -123,107 +50,18 @@ function MatchesPage() {
         return;
       }
 
-      const hiddenFilter = `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`;
-      const { data: matchRows, error: matchError } = await (supabase as any)
-        .from("matches")
-        .select(
-          "id, need_id, participant_one_id, participant_two_id, participant_two_profile_id, partner_name, match_tag, match_score, status, updated_at",
-        )
-        .eq("participant_one_id", uid)
-        .not("status", "in", hiddenFilter)
-        .order("match_score", { ascending: false })
-        .order("updated_at", { ascending: false });
-
-      if (cancelled) return;
-      if (matchError) {
-        setError(matchError.message);
+      try {
+        const result = await getRealMatchesForUser(uid);
+        if (cancelled) return;
+        setMatches(result.matches);
+        setSeedFilteredCount(result.seedFilteredCount);
+        setLoading(false);
+      } catch (loadError) {
+        if (cancelled) return;
+        setError(loadError instanceof Error ? loadError.message : String(loadError));
         setMatches([]);
         setLoading(false);
-        return;
       }
-
-      const rows = ((matchRows ?? []) as MatchRow[]).filter((row) => row.need_id);
-      const profileIds = [
-        ...new Set(
-          rows
-            .map((row) => row.participant_two_profile_id ?? row.participant_two_id)
-            .filter(Boolean) as string[],
-        ),
-      ];
-
-      if (profileIds.length === 0) {
-        setMatches([]);
-        setLoading(false);
-        return;
-      }
-
-      const [{ data: profileRows, error: profileError }, { data: cardRows, error: cardError }] =
-        await Promise.all([
-          (supabase as any)
-            .from("profiles")
-            .select("id, username, display_name, avatar_emoji, bio, location, reputation_score, is_simulated")
-            .in("id", profileIds),
-          (supabase as any)
-            .from("information_cards")
-            .select(
-              "id, user_id, title, category, summary, details, tags, supply_skills, supply_languages, supply_country, supply_city, offer_summary, connection_preferences, media_urls, voice_intro_url, reputation_score, response_rate",
-            )
-            .in("user_id", profileIds)
-            .eq("visibility", "public")
-            .order("created_at", { ascending: false }),
-        ]);
-
-      if (cancelled) return;
-      if (profileError || cardError) {
-        setError(profileError?.message ?? cardError?.message ?? "Failed to load matches.");
-        setMatches([]);
-        setLoading(false);
-        return;
-      }
-
-      const profiles = new Map<string, ProfileRow>(
-        ((profileRows ?? []) as ProfileRow[]).map((profile) => [profile.id, profile]),
-      );
-      const cardsByProfile = new Map<string, IdentityCardRow[]>();
-      for (const card of (cardRows ?? []) as IdentityCardRow[]) {
-        cardsByProfile.set(card.user_id, [...(cardsByProfile.get(card.user_id) ?? []), card]);
-      }
-
-      const realMatches = rows
-        .map((row): RealMatch | null => {
-          const profileId = row.participant_two_profile_id ?? row.participant_two_id;
-          if (!profileId) return null;
-          const profile = profiles.get(profileId);
-          if (!profile) return null;
-          if (profile.is_simulated && !showSimulatedMatches()) return null;
-          const cards = cardsByProfile.get(profileId) ?? [];
-          const username = profile.username ?? row.partner_name ?? profile.id;
-          const displayName = profile.display_name ?? profile.username ?? row.partner_name ?? "Finding user";
-          const primaryCard = cards[0];
-          return {
-            id: row.id,
-            needId: row.need_id,
-            profileId,
-            username,
-            displayName,
-            avatar: profile.avatar_emoji ?? initials(displayName),
-            headline: primaryCard?.title ?? row.match_tag ?? profile.bio ?? "Finding profile",
-            location:
-              profile.location ??
-              [primaryCard?.supply_city, primaryCard?.supply_country].filter(Boolean).join(", ") ??
-              "Global",
-            score: Number(row.match_score ?? 0),
-            reputation: Number(profile.reputation_score ?? primaryCard?.reputation_score ?? 5),
-            status: row.status ?? "active",
-            updatedAt: row.updated_at,
-            cards,
-            dataSource: "real_supabase",
-          };
-        })
-        .filter(Boolean) as RealMatch[];
-
-      setMatches(realMatches);
-      setLoading(false);
     }
 
     void loadMatches();
@@ -312,6 +150,10 @@ function MatchesPage() {
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             数据源: needs → matches → profiles → identity_cards
+          </p>
+          <p className="mt-2 font-mono text-[10px] leading-relaxed text-muted-foreground/70">
+            source: real_supabase · need_id: all · real_match_count: {matches.length} ·
+            seed_filtered_count: {seedFilteredCount}
           </p>
         </motion.div>
 

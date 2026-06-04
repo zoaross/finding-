@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { hasPublicIdentityCard } from "@/lib/realMatches";
 import { hasBlockBetween } from "@/lib/socialActions";
 
 export type DBMessage = {
@@ -213,6 +214,12 @@ async function openOrCreateConversationForUser(
       targetIsSimulated = !!profile.is_simulated;
     }
   }
+  if (targetIsSimulated) {
+    throw new Error("Cannot start chat: production UI does not allow simulated users.");
+  }
+  if (!(await hasPublicIdentityCard(targetUserId))) {
+    throw new Error("Cannot start chat: target profile has no public identity card.");
+  }
 
   if (await hasBlockBetween(currentUserId, targetUserId)) {
     throw new Error("Chat is blocked by privacy settings.");
@@ -265,9 +272,6 @@ async function openOrCreateConversationForUser(
       targetName,
       target.matchTag,
     );
-    if (targetIsSimulated && targetUserId) {
-      await ensureInitialSimulatedReply(existingId, targetUserId, targetName);
-    }
     return existingId;
   }
 
@@ -296,9 +300,6 @@ async function openOrCreateConversationForUser(
       .update({ status: "matched", is_archived: false, updated_at: new Date().toISOString() })
       .eq("id", target.needId)
       .eq("user_id", currentUserId);
-  }
-  if (targetIsSimulated) {
-    await ensureInitialSimulatedReply(data.id as string, targetUserId, targetName);
   }
   setRequestedMatch(data.id as string);
   notifyConversationOpened(data.id as string);
@@ -396,8 +397,7 @@ export async function listMessages(matchId: string): Promise<DBMessage[]> {
 
 /**
  * Insert a new message and return the saved row.
- * No longer requires a matching row in `matches` — the FK was dropped so
- * demo conversations and real conversations both work with any UUID.
+ * Insert through the persisted conversation id used by `matches`.
  */
 export async function sendMessage(
   matchId: string,
@@ -416,57 +416,6 @@ export async function sendMessage(
   if (error) {
     console.error("[chat] sendMessage failed:", error);
     throw new Error(error.message);
-  }
-  return data as DBMessage;
-}
-
-export function mockReplyFor(text: string, partnerName = "Finding partner"): string {
-  const lower = text.toLowerCase();
-  if (/ielts|speaking|english|雅思|口语|영어/.test(lower)) {
-    return "That sounds good. I can do a short speaking practice and give gentle feedback after.";
-  }
-  if (/react|frontend|backend|supabase|api|developer|开发|工程/.test(lower)) {
-    return "I can help with that. Send me the current flow and I will point out the first practical step.";
-  }
-  if (/design|ui|ux|figma|设计/.test(lower)) {
-    return "I like this direction. I can review the profile/card flow and suggest cleaner interaction states.";
-  }
-  if (/korean|korea|seoul|한국|韩语|首尔/.test(lower)) {
-    return "좋아요. We can keep it casual and mix Korean with your preferred language.";
-  }
-  return `Thanks for reaching out. ${partnerName} is interested and can continue from here.`;
-}
-
-export async function ensureInitialSimulatedReply(
-  matchId: string,
-  simulatedProfileId: string,
-  partnerName = "Finding partner",
-): Promise<DBMessage | null> {
-  const { data: existing, error: readError } = await supabase
-    .from("messages")
-    .select("id")
-    .eq("match_id", matchId)
-    .limit(1);
-
-  if (readError) {
-    console.warn("[chat] initial simulated reply check failed:", readError.message);
-    return null;
-  }
-  if (existing && existing.length > 0) return null;
-
-  const { data, error } = await supabase
-    .from("messages")
-    .insert({
-      match_id: matchId,
-      sender_id: simulatedProfileId,
-      content: `Hi, I am ${partnerName}. I saw the match context and I am open to chatting.`,
-    })
-    .select("id, match_id, sender_id, content, created_at")
-    .single();
-
-  if (error) {
-    console.warn("[chat] initial simulated reply failed:", error.message);
-    return null;
   }
   return data as DBMessage;
 }
@@ -510,29 +459,6 @@ export async function ensureSystemWelcomeMessage(
   return data as DBMessage;
 }
 
-export async function sendSimulatedReply(
-  matchId: string,
-  simulatedProfileId: string,
-  inboundText: string,
-  partnerName?: string,
-): Promise<DBMessage | null> {
-  const { data, error } = await supabase
-    .from("messages")
-    .insert({
-      match_id: matchId,
-      sender_id: simulatedProfileId,
-      content: mockReplyFor(inboundText, partnerName),
-    })
-    .select("id, match_id, sender_id, content, created_at")
-    .single();
-
-  if (error) {
-    console.warn("[chat] simulated reply failed:", error.message);
-    return null;
-  }
-  return data as DBMessage;
-}
-
 /**
  * Subscribe to INSERT events on `messages` for a given match.
  * Returns an unsubscribe function — call it on cleanup.
@@ -557,37 +483,4 @@ export function subscribeMessages(matchId: string, onInsert: (msg: DBMessage) =>
   return () => {
     void supabase.removeChannel(channel);
   };
-}
-
-/**
- * Build a stable UUID for a demo conversation ID.
- * Persisted in localStorage so the same demo conv always maps to the same UUID.
- */
-const MAP_KEY = "finding:mock-conv-uuid";
-
-function readMap(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(MAP_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-function writeMap(map: Record<string, string>) {
-  try {
-    localStorage.setItem(MAP_KEY, JSON.stringify(map));
-  } catch {
-    /* ignore */
-  }
-}
-
-export function getMockMatchId(convId: string): string {
-  const map = readMap();
-  if (map[convId]) return map[convId];
-  const uuid =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}-${convId}`;
-  map[convId] = uuid;
-  writeMap(map);
-  return uuid;
 }

@@ -4,7 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 import { StarField } from "@/components/StarField";
-import { HIDDEN_CONVERSATION_STATUSES, openOrCreateConversation } from "@/lib/chat";
+import { openOrCreateConversation } from "@/lib/chat";
+import {
+  getRealMatchCountsForNeeds,
+  getRealMatchesForNeed,
+  type RealMatch as NeedMatch,
+} from "@/lib/realMatches";
 import { saveNeedCloseFeedback, type NeedCloseReason } from "@/lib/socialActions";
 import { supabase } from "@/lib/supabase";
 import { useI18n } from "@/lib/i18n";
@@ -51,24 +56,10 @@ type NeedRow = {
   created_at: string;
 };
 
-type NeedMatch = {
-  id: string;
-  needId: string;
-  partnerId: string;
-  username: string;
-  displayName: string;
-  avatar: string;
-  headline: string;
-  location: string;
-  score: number;
-  cardId: string | null;
-  cardTitle: string | null;
-  dataSource: "real_supabase";
-};
-
 type MatchCountInfo = {
   real: number;
   seedFiltered: number;
+  source: "real_supabase";
 };
 
 const navItems = [
@@ -569,6 +560,7 @@ function NeedsPage() {
                     need={n}
                     status={effectiveStatus(n, overrides)}
                     matchCount={matchCounts[n.id]?.real ?? 0}
+                    seedFilteredCount={matchCounts[n.id]?.seedFiltered ?? 0}
                     onOpen={() => setSelectedId(n.id)}
                   />
                 ))}
@@ -606,46 +598,14 @@ function NeedsPage() {
       setMatchCounts({});
       return;
     }
-    const hiddenFilter = `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`;
-    const { data: rows, error: matchError } = await (supabase as any)
-      .from("matches")
-      .select("need_id, participant_two_id, participant_two_profile_id, status")
-      .in("need_id", needIds)
-      .not("status", "in", hiddenFilter);
-    if (matchError) {
-      console.warn("[needs] match counts failed:", matchError.message);
-      return;
+    try {
+      setMatchCounts(await getRealMatchCountsForNeeds(needIds));
+    } catch (countError) {
+      console.warn(
+        "[needs] match counts failed:",
+        countError instanceof Error ? countError.message : String(countError),
+      );
     }
-    const profileIds = [
-      ...new Set(
-        ((rows ?? []) as any[])
-          .map((row) => row.participant_two_profile_id ?? row.participant_two_id)
-          .filter(Boolean) as string[],
-      ),
-    ];
-    const { data: profiles, error: profileError } = profileIds.length
-      ? await (supabase as any).from("profiles").select("id, is_simulated").in("id", profileIds)
-      : { data: [], error: null };
-    if (profileError) {
-      console.warn("[needs] match count profiles failed:", profileError.message);
-      return;
-    }
-    const simulated = new Set(
-      ((profiles ?? []) as any[])
-        .filter((profile) => profile.is_simulated)
-        .map((profile) => profile.id as string),
-    );
-    const next: Record<string, MatchCountInfo> = {};
-    for (const id of needIds) next[id] = { real: 0, seedFiltered: 0 };
-    for (const row of (rows ?? []) as any[]) {
-      const needId = row.need_id as string | null;
-      const profileId = (row.participant_two_profile_id ?? row.participant_two_id) as string | null;
-      if (!needId || !profileId) continue;
-      if (!next[needId]) next[needId] = { real: 0, seedFiltered: 0 };
-      if (simulated.has(profileId)) next[needId].seedFiltered += 1;
-      else next[needId].real += 1;
-    }
-    setMatchCounts(next);
   }
 }
 
@@ -653,11 +613,13 @@ function NeedCard({
   need,
   status,
   matchCount,
+  seedFilteredCount,
   onOpen,
 }: {
   need: NeedRow;
   status: LocalStatus;
   matchCount: number;
+  seedFilteredCount: number;
   onOpen: () => void;
 }) {
   const { t } = useI18n();
@@ -719,6 +681,10 @@ function NeedCard({
             {t("needs.viewDetail")}
           </span>
         </div>
+        <p className="mt-3 font-mono text-[9px] leading-relaxed text-muted-foreground/60">
+          source: real_supabase · need_id: {need.id.slice(0, 8)} · real_match_count:{" "}
+          {matchCount} · seed_filtered_count: {seedFilteredCount}
+        </p>
       </button>
     </motion.li>
   );
@@ -967,97 +933,19 @@ function NeedDetailModal({
       }
       setMatchesLoading(true);
       setMatchesError(null);
-      const hiddenFilter = `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`;
-      const { data: matchRows, error: matchError } = await (supabase as any)
-        .from("matches")
-        .select("id, need_id, participant_two_id, participant_two_profile_id, partner_name, match_tag, match_score, status, updated_at")
-        .eq("need_id", need.id)
-        .not("status", "in", hiddenFilter)
-        .order("match_score", { ascending: false })
-        .order("updated_at", { ascending: false });
-      if (cancelled) return;
-      if (matchError) {
-        setMatchesError(matchError.message);
+      try {
+        const result = await getRealMatchesForNeed(need.id);
+        if (cancelled) return;
+        setRealMatches(result.matches);
+        setSeedFilteredCount(result.seedFilteredCount);
+        setMatchesLoading(false);
+      } catch (matchError) {
+        if (cancelled) return;
+        setMatchesError(matchError instanceof Error ? matchError.message : String(matchError));
         setRealMatches([]);
         setSeedFilteredCount(0);
         setMatchesLoading(false);
-        return;
       }
-      const profileIds = [
-        ...new Set(
-          ((matchRows ?? []) as any[])
-            .map((row) => row.participant_two_profile_id ?? row.participant_two_id)
-            .filter(Boolean) as string[],
-        ),
-      ];
-      if (!profileIds.length) {
-        setRealMatches([]);
-        setSeedFilteredCount(0);
-        setMatchesLoading(false);
-        return;
-      }
-      const [{ data: profileRows, error: profileError }, { data: cardRows, error: cardError }] =
-        await Promise.all([
-          (supabase as any)
-            .from("profiles")
-            .select("id, username, display_name, avatar_emoji, bio, location, reputation_score, is_simulated")
-            .in("id", profileIds),
-          (supabase as any)
-            .from("information_cards")
-            .select("id, user_id, title, summary, tags, supply_skills, supply_languages, supply_country, supply_city, visibility, created_at")
-            .in("user_id", profileIds)
-            .eq("visibility", "public")
-            .order("created_at", { ascending: false }),
-        ]);
-      if (cancelled) return;
-      if (profileError || cardError) {
-        setMatchesError(profileError?.message ?? cardError?.message ?? "Failed to load matches.");
-        setRealMatches([]);
-        setSeedFilteredCount(0);
-        setMatchesLoading(false);
-        return;
-      }
-      const profiles = new Map<string, any>(((profileRows ?? []) as any[]).map((profile) => [profile.id, profile]));
-      const cardsByProfile = new Map<string, any[]>();
-      for (const card of (cardRows ?? []) as any[]) {
-        cardsByProfile.set(card.user_id, [...(cardsByProfile.get(card.user_id) ?? []), card]);
-      }
-      let filteredSeeds = 0;
-      const real = ((matchRows ?? []) as any[])
-        .map((row): NeedMatch | null => {
-          const partnerId = row.participant_two_profile_id ?? row.participant_two_id;
-          if (!partnerId) return null;
-          const profile = profiles.get(partnerId);
-          if (!profile) return null;
-          if (profile.is_simulated) {
-            filteredSeeds += 1;
-            return null;
-          }
-          const card = (cardsByProfile.get(partnerId) ?? [])[0] ?? null;
-          const username = profile.username ?? row.partner_name ?? partnerId;
-          const displayName = profile.display_name ?? profile.username ?? row.partner_name ?? "Finding user";
-          return {
-            id: row.id,
-            needId: row.need_id,
-            partnerId,
-            username,
-            displayName,
-            avatar: profile.avatar_emoji ?? displayName.slice(0, 1).toUpperCase(),
-            headline: card?.title ?? row.match_tag ?? profile.bio ?? "Finding match",
-            location:
-              profile.location ??
-              [card?.supply_city, card?.supply_country].filter(Boolean).join(", ") ??
-              "Global",
-            score: Number(row.match_score ?? 0),
-            cardId: card?.id ?? null,
-            cardTitle: card?.title ?? null,
-            dataSource: "real_supabase",
-          };
-        })
-        .filter(Boolean) as NeedMatch[];
-      setRealMatches(real);
-      setSeedFilteredCount(filteredSeeds);
-      setMatchesLoading(false);
     }
     void loadRealMatches();
     return () => {
@@ -1068,7 +956,7 @@ function NeedDetailModal({
   const startChat = async (match: NeedMatch) => {
     try {
       const conversationId = await openOrCreateConversation({
-        partnerId: match.partnerId,
+        partnerId: match.profileId,
         partnerUsername: match.username,
         partnerName: match.displayName,
         sourceNeedId: match.needId,

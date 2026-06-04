@@ -7,14 +7,6 @@ import { isSavedUser, setSavedUser } from "@/lib/socialActions";
 import { supabase } from "@/lib/supabase";
 import { useI18n } from "@/lib/i18n";
 import {
-  Palette,
-  Camera,
-  Sparkles,
-  Globe,
-  Briefcase,
-  Code2,
-  PenTool,
-  LineChart,
   ArrowLeft,
   type LucideIcon,
 } from "lucide-react";
@@ -40,65 +32,6 @@ export type ProfilePreviewData = {
   tags: string[];
   portfolio?: PortfolioItem[];
 };
-
-const DEFAULT_PORTFOLIO: PortfolioItem[] = [
-  {
-    title: "品牌视觉设计 · 2024",
-    desc: "为初创公司设计完整视觉体系",
-    full: "为一家位于首尔的金融科技初创公司从 0 到 1 搭建品牌识别系统,涵盖 logo、配色、字体与产品 UI 规范。上线 3 个月后用户留存提升 32%,获 2024 韩国设计协会优秀奖。",
-    date: "2024 · 3 个月",
-    tags: ["品牌设计", "VI 系统", "金融科技"],
-    icon: Palette,
-    img: "https://images.unsplash.com/photo-1561070791-2526d30994b8?w=900",
-  },
-  {
-    title: "跨境内容拍摄 · 2024",
-    desc: "中韩双语短视频内容企划",
-    full: "为出海中国美妆品牌策划并执行韩国市场短视频内容,15 支视频累计播放 800 万,带动品牌韩国旗舰店首月 GMV 增长 2.3 倍。",
-    date: "2024 · 2 个月",
-    tags: ["内容企划", "短视频", "跨境营销"],
-    icon: Camera,
-    img: "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?w=900",
-  },
-  {
-    title: "产品体验升级 · 2023",
-    desc: "将复杂理财流程精简为 3 步",
-    full: "重新设计核心产品的开户与配置流程,通过用户旅程梳理与原型测试,把转化率从 41% 提升到 78%,该项目获 UX 设计奖。",
-    date: "2023 · 4 个月",
-    tags: ["UX 设计", "用户研究", "A/B 测试"],
-    icon: Sparkles,
-    img: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=900",
-  },
-  {
-    title: "全球远程协作 · 2023",
-    desc: "服务 4 个跨国团队的技术顾问",
-    full: "作为技术顾问参与 4 个跨国团队的产品搭建,擅长用英语 / 中文 / 韩语在不同时区团队间搭桥,推动从 0 到 MVP 的快速落地。",
-    date: "2023 · 全年",
-    tags: ["远程协作", "跨文化", "技术顾问"],
-    icon: Globe,
-    img: "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?w=900",
-  },
-];
-
-const FALLBACK_ICONS: LucideIcon[] = [
-  Palette,
-  Camera,
-  Sparkles,
-  Globe,
-  Briefcase,
-  Code2,
-  PenTool,
-  LineChart,
-];
-
-export function buildPortfolio(seedItems?: Partial<PortfolioItem>[]): PortfolioItem[] {
-  if (!seedItems || seedItems.length === 0) return DEFAULT_PORTFOLIO;
-  return seedItems.map((s, i) => ({
-    ...DEFAULT_PORTFOLIO[i % DEFAULT_PORTFOLIO.length],
-    ...s,
-    icon: s.icon ?? FALLBACK_ICONS[i % FALLBACK_ICONS.length],
-  }));
-}
 
 type Props = {
   open: ProfilePreviewData | null;
@@ -197,8 +130,7 @@ export function ProfilePreviewModal({ open, onClose }: Props) {
     navigate({ to: "/user/$username", params: { username: data.name } });
   };
 
-  const portfolio =
-    open?.portfolio && open.portfolio.length > 0 ? open.portfolio : DEFAULT_PORTFOLIO;
+  const portfolio = open?.portfolio ?? [];
   const expanded = expandedIdx != null ? portfolio[expandedIdx] : null;
 
   return (
@@ -329,6 +261,11 @@ export function ProfilePreviewModal({ open, onClose }: Props) {
                         {t("profile.portfolio")}
                       </h3>
                       <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {portfolio.length === 0 && (
+                          <div className="col-span-full rounded-2xl border border-[var(--border)] bg-white/[0.02] p-4 text-sm text-muted-foreground">
+                            No real portfolio yet.
+                          </div>
+                        )}
                         {portfolio.map((p, i) => {
                           const Icon = p.icon;
                           return (

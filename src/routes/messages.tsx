@@ -8,7 +8,6 @@ import { supabase } from "@/lib/supabase";
 import {
   listMessages,
   sendMessage,
-  sendSimulatedReply,
   subscribeMessages,
   consumeRequestedMatch,
   CONVERSATION_OPENED_EVENT,
@@ -33,8 +32,6 @@ import {
 import {
   ProfilePreviewModal,
   type ProfilePreviewData,
-  buildPortfolio,
-  type PortfolioItem,
 } from "@/components/ProfilePreviewModal";
 import { PREF_LANG_KEY, PREF_LANGS, PINNED_LANG_CODES } from "@/routes/settings";
 import { type MvpLanguageCode, useI18n, useTranslationLanguage } from "@/lib/i18n";
@@ -287,8 +284,12 @@ function MessagesPage() {
       .select("id, username, avatar_emoji, location, is_simulated")
       .in("id", otherIds);
     const pMap = new Map<string, any>(((profiles as any[]) ?? []).map((p: any) => [p.id, p]));
+    const realMatchList = matchList.filter((m) => {
+      const profile = pMap.get(m.otherId as string);
+      return profile && !profile.is_simulated;
+    });
 
-    const msgPromises = matchList.map((m) =>
+    const msgPromises = realMatchList.map((m) =>
       (supabase as any)
         .from("messages")
         .select("content, created_at")
@@ -299,7 +300,7 @@ function MessagesPage() {
     );
     const msgResults = await Promise.all(msgPromises);
 
-    return matchList.map((m, i) => {
+    return realMatchList.map((m, i) => {
       const p = pMap.get(m.otherId as string);
       const lastMsg = (msgResults[i] as any)?.data;
       const updated = (m.updated ?? m.updated_at ?? new Date().toISOString()) as string;
@@ -635,35 +636,6 @@ function MessagesPage() {
       ),
     );
 
-    if (active.isSimulated && active.userId) {
-      window.setTimeout(() => {
-        void sendSimulatedReply(matchId, active.userId!, text, active.name).then((reply) => {
-          if (!reply) return;
-          setThread((prev) => {
-            if (prev.some((m) => m.id === reply.id)) return prev;
-            return [
-              ...prev,
-              {
-                id: reply.id,
-                from: "them",
-                text: reply.content,
-                time: new Date(reply.created_at).toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                }),
-              },
-            ];
-          });
-          setConvs((prev) =>
-            prev.map((c) =>
-              c.id === activeConversationId
-                ? { ...c, preview: reply.content.slice(0, 30), time: t("time.now"), unread: 1 }
-                : c,
-            ),
-          );
-        });
-      }, 700);
-    }
   };
 
   const active = convs.find((c) => c.id === activeConversationId) ?? null;
@@ -947,40 +919,6 @@ function MessagesPage() {
     });
   };
 
-  // Per-tag mini portfolios so each identity card shows distinct content
-  const portfolioByTag: Record<string, PortfolioItem[] | undefined> = {
-    "🎨 插画师": buildPortfolio([
-      {
-        title: "暗黑奇幻 BJD 系列 · 2024",
-        desc: "8 张原画 · 神秘学主题",
-        tags: ["插画", "BJD", "暗黑奇幻"],
-      },
-      { title: "霓虹少女 概念稿 · 2024", desc: "赛博朋克角色设定", tags: ["概念设计", "角色"] },
-      { title: "古风系列 · 桃夭", desc: "传统水墨与现代构图融合", tags: ["古风", "水墨"] },
-      { title: "原创角色 · 月神", desc: "神秘学符号与塔罗灵感", tags: ["原创", "塔罗"] },
-    ]),
-    "📚 N1 日语": buildPortfolio([
-      {
-        title: "JLPT N1 · 满分通过",
-        desc: "听力 60/60 · 阅读 58/60",
-        tags: ["日语", "N1", "教学"],
-      },
-      {
-        title: "线上日语家教 · 50+ 学员",
-        desc: "商务、JLPT 备考、口语陪练",
-        tags: ["家教", "线上"],
-      },
-      { title: "日中互译实务 · 2023", desc: "动漫脚本 / 商务文件翻译", tags: ["翻译"] },
-      { title: "日本文化分享 Vlog", desc: "B 站 2 万粉丝", tags: ["内容创作"] },
-    ]),
-    "🍜 约饭搭子": buildPortfolio([
-      { title: "首尔探店地图 · 50+ 家", desc: "弘大 / 江南 / 圣水洞", tags: ["美食", "首尔"] },
-      { title: "周末桌游聚会 · 月度", desc: "8-12 人小型线下", tags: ["社交", "桌游"] },
-      { title: "City Walk 路线设计", desc: "为新朋友定制半日路线", tags: ["City Walk"] },
-      { title: "K-Pop 演唱会拼车", desc: "多次组织小团出行", tags: ["演唱会"] },
-    ]),
-  };
-
   const openActiveProfile = (scrollTag?: string) => {
     if (!active) return;
     setProfile({
@@ -992,8 +930,8 @@ function MessagesPage() {
       bio: `来自 ${active.region} 的 ${active.matchTag},正在 Finding 上寻找长期合作伙伴。${
         scrollTag ? `当前查看身份卡:${scrollTag}` : ""
       }`,
-      tags: [active.matchTag, "🎨 插画师", "📚 N1 日语", "🍜 约饭搭子"],
-      portfolio: scrollTag ? portfolioByTag[scrollTag] : undefined,
+      tags: [active.matchTag],
+      portfolio: undefined,
     });
   };
 

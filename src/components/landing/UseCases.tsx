@@ -60,7 +60,7 @@ function Mockup({ kind }: { kind: string }) {
         {["Berlin", "Lisbon", "Tokyo", "NYC", "São Paulo", "Bali"].map((c, i) => (
           <div key={c} className="rounded-xl border border-border bg-muted/30 p-2">
             <div className="text-muted-foreground">{c}</div>
-            <div className="mt-1 font-display text-foreground">{12 - i} {mock.candidates}</div>
+            <div className="mt-1 font-display text-foreground">{mock.candidates}</div>
           </div>
         ))}
       </div>

@@ -13,6 +13,7 @@ import {
   setSavedUser,
 } from "@/lib/socialActions";
 import { supabase } from "@/lib/supabase";
+import { getRealMatchesForUser } from "@/lib/realMatches";
 import { useProfile, saveProfile } from "@/hooks/useProfile";
 import {
   deleteInformationCard,
@@ -66,39 +67,13 @@ const buildNavItems = (isOwner: boolean) => [
   { key: "nav.settings", icon: IconSettings, to: "/settings" as const, active: false },
 ];
 
-const profileStats = [
-  { label: "匹配次数", value: 12, suffix: "" },
-  { label: "信誉分", value: 5.0, suffix: "", decimals: 1 },
-  { label: "身份卡", value: 3, suffix: "" },
-  { label: "帮助率", value: 98, suffix: "%" },
-];
-
-const identityCards = [
-  {
-    emoji: "🎨",
-    title: "插画师",
-    desc: "暗黑风 · BJD · 原创角色",
-    tags: ["插画", "BJD", "创意"],
-    glow: "from-fuchsia-500/30 to-purple-500/10",
-  },
-  {
-    emoji: "📚",
-    title: "日语家教",
-    desc: "JLPT N1 · 线上授课",
-    tags: ["日语", "教育"],
-    glow: "from-sky-500/30 to-indigo-500/10",
-  },
-  {
-    emoji: "🍜",
-    title: "约饭搭子",
-    desc: "首尔 · 周末探店",
-    tags: ["社交", "首尔"],
-    glow: "from-amber-500/30 to-rose-500/10",
-  },
-];
-
-type IdentityCardView = (typeof identityCards)[number] & {
+type IdentityCardView = {
   id?: string;
+  emoji: string;
+  title: string;
+  desc: string;
+  tags: string[];
+  glow: string;
   longDetails?: string | null;
   supplySkills?: string[];
   supplyLanguages?: string[];
@@ -646,17 +621,13 @@ export function ProfilePageInner({
       if (s < 86400 * 30) return `${Math.floor(s / 86400 / 7)} 周前`;
       return `${Math.floor(s / 86400 / 30)} 个月前`;
     };
-    const [c1, c2] = await Promise.all([
-      (supabase as any)
-        .from("matches")
-        .select("id", { count: "exact", head: true })
-        .eq("participant_one_id", uid),
-      (supabase as any)
-        .from("matches")
-        .select("id", { count: "exact", head: true })
-        .eq("participant_two_id", uid),
-    ]);
-    setRealMatchCount(((c1 as any).count ?? 0) + ((c2 as any).count ?? 0));
+    try {
+      const realMatches = await getRealMatchesForUser(uid);
+      setRealMatchCount(realMatches.realMatchCount);
+    } catch (matchError) {
+      console.warn("[profile] real match count failed:", matchError);
+      setRealMatchCount(0);
+    }
 
     const { data: pRow } = await (supabase as any)
       .from("profiles")
@@ -697,24 +668,8 @@ export function ProfilePageInner({
             voiceIntroUrl: card.voice_intro_url,
           })),
         );
-      } else if (pRow) {
-        const skills = Array.isArray((pRow as any).skills)
-          ? ((pRow as any).skills as string[])
-          : [];
-        const glows = [
-          "from-fuchsia-500/30 to-purple-500/10",
-          "from-sky-500/30 to-indigo-500/10",
-          "from-amber-500/30 to-rose-500/10",
-        ];
-        setRealIdentCards(
-          skills.slice(0, 4).map((s, i) => ({
-            emoji: "⭐",
-            title: s,
-            desc: cardSupplyFallback,
-            tags: [s],
-            glow: glows[i % 3],
-          })),
-        );
+      } else {
+        setRealIdentCards([]);
       }
     } catch (error) {
       console.warn("[profile] information_cards unavailable:", error);
@@ -1540,21 +1495,21 @@ export function ProfilePageInner({
                 {[
                   {
                     label: t("profile.stats.matches"),
-                    value: realMatchCount ?? profileStats[0].value,
+                    value: realMatchCount ?? 0,
                     suffix: "",
                   },
                   {
                     label: t("profile.stats.rating"),
-                    value: realRepScore ?? profileStats[1].value,
+                    value: realRepScore ?? 0,
                     suffix: "",
                     decimals: 1,
                   },
                   {
                     label: t("profile.stats.cards"),
-                    value: realIdentCards.length || profileStats[2].value,
+                    value: realIdentCards.length,
                     suffix: "",
                   },
-                  { label: t("profile.stats.helpRate"), value: profileStats[3].value, suffix: "%" },
+                  { label: t("profile.stats.helpRate"), value: 0, suffix: "%" },
                 ].map((s) => (
                   <StatBlock key={s.label} {...s} />
                 ))}
@@ -1610,18 +1565,12 @@ export function ProfilePageInner({
                     transition={{ duration: 0.25 }}
                     className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
                   >
-                    {/* Owner: show real identity cards with delete; Viewer: show their skills */}
-                    {(
-                      (isOwner
-                        ? realIdentCards.length
-                          ? realIdentCards
-                          : identityCards
-                        : realIdentCards.length
-                          ? realIdentCards
-                          : viewingCards.length
-                            ? viewingCards
-                            : identityCards) as IdentityCardView[]
-                    ).map((c, i) => (
+                    {realIdentCards.length === 0 && (
+                      <div className="col-span-full rounded-2xl border border-[var(--border)] bg-white/[0.02] p-5 text-sm text-muted-foreground">
+                        No real identity cards yet.
+                      </div>
+                    )}
+                    {realIdentCards.map((c, i) => (
                       <IdentityCard
                         key={`${c.title}-${i}`}
                         card={c}

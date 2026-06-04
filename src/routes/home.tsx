@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 import { StarField } from "@/components/StarField";
 import { HIDDEN_CONVERSATION_STATUSES, openOrCreateConversation } from "@/lib/chat";
+import { getRealMatchesForUser } from "@/lib/realMatches";
 import { supabase } from "@/lib/supabase";
 import { setSavedNeed } from "@/lib/socialActions";
 import { parseNeedIntent } from "@/lib/claude";
@@ -61,11 +62,15 @@ type HotNeed = {
 
 type RecUser = {
   id: string;
+  matchId: string;
+  needId: string;
+  cardId: string;
   name: string;
   title: string;
   region: string;
   match: number;
   emoji: string;
+  seedFilteredCount: number;
 };
 
 type KnownPerson = {
@@ -156,6 +161,7 @@ function HomePage() {
   // ── Real data state ──
   const [activeNeedCount, setActiveNeedCount] = useState<number | null>(null);
   const [totalMatchCount, setTotalMatchCount] = useState<number | null>(null);
+  const [seedFilteredMatchCount, setSeedFilteredMatchCount] = useState<number>(0);
   const [userConvCount, setUserConvCount] = useState<number | null>(null);
   const [onlineCount, setOnlineCount] = useState<string>("…");
   const [todayNeedsStr, setTodayNeedsStr] = useState<string>("…");
@@ -291,61 +297,25 @@ function HomePage() {
 
     try {
       // ── Counts ──
-      const [todayR, profilesR, matchRowsR, c1R, c2R] = await Promise.all([
+      const [todayR, profilesR] = await Promise.all([
         (supabase as any)
           .from("needs")
           .select("id", { count: "exact", head: true })
           .gte("created_at", todayStart.toISOString())
           .eq("is_archived", false),
         (supabase as any).from("profiles").select("id", { count: "exact", head: true }),
-        (supabase as any)
-          .from("matches")
-          .select("participant_two_id, participant_two_profile_id")
-          .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`),
-        (supabase as any)
-          .from("matches")
-          .select("id", { count: "exact", head: true })
-          .eq("participant_one_id", uid)
-          .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`),
-        (supabase as any)
-          .from("matches")
-          .select("id", { count: "exact", head: true })
-          .eq("participant_two_id", uid)
-          .not("status", "in", `(${HIDDEN_CONVERSATION_STATUSES.join(",")})`),
       ] as Promise<{ count: number | null }>[]);
 
       const todayN = (todayR as any).count ?? 0;
       const profTotal = (profilesR as any).count ?? 0;
-      const matchRows = ((matchRowsR as any).data ?? []) as Array<{
-        participant_two_id?: string | null;
-        participant_two_profile_id?: string | null;
-      }>;
-      const matchProfileIds = [
-        ...new Set(
-          matchRows
-            .map((row) => row.participant_two_profile_id ?? row.participant_two_id)
-            .filter(Boolean) as string[],
-        ),
-      ];
-      const { data: matchProfiles } = matchProfileIds.length
-        ? await (supabase as any).from("profiles").select("id, is_simulated").in("id", matchProfileIds)
-        : { data: [] };
-      const simulatedMatchProfileIds = new Set(
-        ((matchProfiles as any[]) ?? [])
-          .filter((profile) => profile.is_simulated)
-          .map((profile) => profile.id as string),
-      );
-      const matchTotal = matchRows.filter((row) => {
-        const profileId = row.participant_two_profile_id ?? row.participant_two_id;
-        return profileId && !simulatedMatchProfileIds.has(profileId);
-      }).length;
-      const c1 = (c1R as any).count ?? 0;
-      const c2 = (c2R as any).count ?? 0;
+      const realMatchResult = await getRealMatchesForUser(uid);
+      const matchTotal = realMatchResult.realMatchCount;
 
       setTodayNeedsStr(todayN > 0 ? `+${todayN}` : "0");
       setOnlineCount(profTotal > 0 ? profTotal.toLocaleString() : "—");
       setTotalMatchCount(matchTotal);
-      setUserConvCount(c1 + c2);
+      setSeedFilteredMatchCount(realMatchResult.seedFilteredCount);
+      setUserConvCount(matchTotal);
 
       // ── Live feed (recent 5 needs) ──
       const { data: recentNeeds } = await (supabase as any)
@@ -412,10 +382,26 @@ function HomePage() {
         setHotNeedsItems(items);
       }
 
-      // ── Recommendations + People you may know (real profiles) ──
+      // ── Recent matches: real Supabase matches only ──
+      setRecUsers(
+        realMatchResult.matches.slice(0, 3).map((match) => ({
+          id: match.profileId,
+          matchId: match.id,
+          needId: match.needId,
+          cardId: match.cardId,
+          name: match.displayName,
+          title: match.headline,
+          region: match.location,
+          match: Math.round(match.score),
+          emoji: match.avatar,
+          seedFilteredCount: realMatchResult.seedFilteredCount,
+        })),
+      );
+
+      // ── People you may know (real non-simulated profiles only, not match counts) ──
       const { data: otherProfiles } = await (supabase as any)
         .from("profiles")
-        .select("id, username, bio, location, avatar_url, avatar_emoji")
+        .select("id, username, bio, location, avatar_url, avatar_emoji, is_simulated")
         .neq("id", uid)
         .limit(8);
 
@@ -438,16 +424,11 @@ function HomePage() {
             .filter(Boolean) as string[],
         );
         const profs = (otherProfiles as any[]).filter(
-          (p: any) => !blockedIds.has(p.id as string) && !hiddenPartnerIds.has(p.id as string),
+          (p: any) =>
+            !p.is_simulated &&
+            !blockedIds.has(p.id as string) &&
+            !hiddenPartnerIds.has(p.id as string),
         );
-        const toRecUser = (p: any): RecUser => ({
-          id: p.id as string,
-          name: (p.username as string) ?? t("home.userFallback"),
-          title: p.bio ? (p.bio as string).slice(0, 18) : t("home.findingUser"),
-          region: (p.location as string) ?? `🌏 ${t("home.global")}`,
-          match: idHash(p.id as string, 15, 82),
-          emoji: (p.avatar_emoji as string) ?? (p.username as string)?.[0]?.toUpperCase() ?? "👤",
-        });
         const toKnown = (p: any): KnownPerson => ({
           id: p.id as string,
           name: (p.username as string) ?? t("home.userFallback"),
@@ -455,7 +436,6 @@ function HomePage() {
           emoji: (p.avatar_emoji as string) ?? (p.username as string)?.[0]?.toUpperCase() ?? "👤",
           mutual: idHash(p.id as string, 7, 1),
         });
-        setRecUsers(profs.slice(0, 3).map(toRecUser));
         setKnownPeople(profs.slice(3, 6).map(toKnown));
       }
 
@@ -716,6 +696,17 @@ function HomePage() {
                   {s.value}
                 </p>
                 <p className="mt-1 text-[11px] text-muted-foreground">{s.trend}</p>
+                {s.label === t("home.stats.globalMatches") && (
+                  <p className="mt-2 font-mono text-[9px] leading-relaxed text-muted-foreground/70">
+                    source: real_supabase
+                    <br />
+                    need_id: all
+                    <br />
+                    real_match_count: {totalMatchCount ?? 0}
+                    <br />
+                    seed_filtered_count: {seedFilteredMatchCount}
+                  </p>
+                )}
               </div>
             ))}
           </motion.section>
@@ -913,6 +904,11 @@ function HomePage() {
                         <p className="truncate text-xs text-muted-foreground">{m.title}</p>
                         <p className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
                           {m.region}
+                        </p>
+                        <p className="mt-2 font-mono text-[9px] leading-relaxed text-muted-foreground/60">
+                          source: real_supabase · need_id: {m.needId.slice(0, 8)} ·
+                          real_match_count: {recUsers.length} · seed_filtered_count:{" "}
+                          {m.seedFilteredCount}
                         </p>
                       </div>
                     </div>

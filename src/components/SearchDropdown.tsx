@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { IconSearch } from "@/components/icons/FindingIcons";
 import { openOrCreateConversation } from "@/lib/chat";
 import { supabase } from "@/lib/supabase";
-import { mockNeeds, type NeedItem } from "@/routes/discover";
 
 export type SearchUser = {
   id: string;
@@ -89,7 +88,7 @@ export function SearchDropdown({
     (async () => {
       const { data: pData } = await supabase
         .from("profiles")
-        .select("id, username, avatar_url, bio, location")
+        .select("id, username, avatar_url, bio, location, is_simulated")
         .limit(200);
       if (alive && pData) {
         setProfiles(
@@ -100,9 +99,10 @@ export function SearchDropdown({
               avatar_url: string | null;
               bio: string | null;
               location: string | null;
+              is_simulated?: boolean | null;
             }>
           )
-            .filter((p) => p.username)
+            .filter((p) => p.username && !p.is_simulated)
             .map((p) => ({
               id: p.id,
               username: p.username!,
@@ -130,12 +130,18 @@ export function SearchDropdown({
         // Build a lookup of user_id -> username from already-loaded profiles
         const byId = new Map<string, { username: string; avatar_url: string | null }>();
         for (const p of pData ?? []) {
-          const row = p as { id: string; username: string | null; avatar_url: string | null };
+          const row = p as {
+            id: string;
+            username: string | null;
+            avatar_url: string | null;
+            is_simulated?: boolean | null;
+          };
+          if (row.is_simulated) continue;
           if (row.username)
             byId.set(row.id, { username: row.username, avatar_url: row.avatar_url });
         }
         setDbNeeds(
-          rows.map((n) => {
+          rows.filter((n) => byId.has(n.user_id)).map((n) => {
             const owner = byId.get(n.user_id);
             const name = owner?.username || "匿名";
             return {
@@ -181,18 +187,7 @@ export function SearchDropdown({
       .filter((p) => matches(q, [p.username, p.bio, p.location], p.tags))
       .slice(0, 6);
 
-    const fromDb = dbNeeds.filter((n) => matches(q, [n.content, n.posterName], n.tags));
-    const fromMock: SearchNeed[] = (mockNeeds as NeedItem[])
-      .filter((n) => matches(q, [n.content, n.name, n.city], n.tags))
-      .map((n) => ({
-        id: `mock:${n.id}`,
-        content: n.content,
-        tags: n.tags,
-        posterId: undefined,
-        posterName: n.name,
-        posterInitial: n.emoji,
-      }));
-    const needResults = [...fromDb, ...fromMock].slice(0, 6);
+    const needResults = dbNeeds.filter((n) => matches(q, [n.content, n.posterName], n.tags)).slice(0, 6);
 
     return { userResults, needResults };
   }, [query, profiles, dbNeeds]);
@@ -240,7 +235,7 @@ export function SearchDropdown({
         partnerId: n.posterId,
         partnerUsername: n.posterName,
         partnerName: n.posterName,
-        sourceNeedId: n.id.startsWith("mock:") ? null : n.id,
+        sourceNeedId: n.id,
         matchTag: n.tags[0] || "Need match",
       });
       toast.success(`已联系 ${n.posterName},告诉 TA 你能帮忙`);
